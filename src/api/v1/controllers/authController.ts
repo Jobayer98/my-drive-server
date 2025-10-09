@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { AuthService } from '../../../services/authService';
 import { ResponseController } from '../../../utils/responseController';
+import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import logger from '../../../utils/logger';
 
 const authService = new AuthService();
@@ -42,5 +43,19 @@ export const login = async (req: Request, res: Response) => {
     }
     
     return ResponseController.serverError(res, 'Login failed');
+  }
+};
+
+export const logout = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await authService.logout(req.user!.userId);
+    
+    logger.info(`User logged out successfully: ${req.user!.email}`);
+    
+    return ResponseController.ok(res, 'Logout successful');
+  } catch (error) {
+    logger.error('Logout error:', error);
+    
+    return ResponseController.serverError(res, 'Logout failed');
   }
 };

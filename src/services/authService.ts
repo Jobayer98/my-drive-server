@@ -86,4 +86,8 @@ export class AuthService {
       refreshToken: tokens.refreshToken
     };
   }
+
+  async logout(userId: string): Promise<void> {
+    await User.findByIdAndUpdate(userId, { $unset: { refreshToken: 1 } });
+  }
 }

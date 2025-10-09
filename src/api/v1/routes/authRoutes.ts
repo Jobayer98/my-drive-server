@@ -1,12 +1,18 @@
 import { Router } from 'express';
-import { register, login } from '../controllers/authController';
+import { register, login, logout } from '../controllers/authController';
 import { validateRegister, validateLogin } from '../validators/authValidator';
+import { authenticateToken } from '../middleware/authMiddleware';
 
 const router = Router();
 
 /**
  * @swagger
  * components:
+ *   securitySchemes:
+ *     bearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
  *   schemas:
  *     RegisterRequest:
  *       type: object
@@ -160,5 +166,45 @@ router.post('/register', validateRegister, register);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/login', validateLogin, login);
+
+/**
+ * @swagger
+ * /api/v1/auth/logout:
+ *   post:
+ *     summary: Logout user
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logout successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Logout successful
+ *                 timestamp:
+ *                   type: string
+ *                   example: 2023-01-01T00:00:00.000Z
+ *       400:
+ *         description: Invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/logout', authenticateToken, logout);
 
 export default router;
