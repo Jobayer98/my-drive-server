@@ -24,3 +24,23 @@ export const register = async (req: Request, res: Response) => {
     return ResponseController.serverError(res, 'Registration failed');
   }
 };
+
+export const login = async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+    
+    const result = await authService.login({ email, password });
+    
+    logger.info(`User logged in successfully: ${email}`);
+    
+    return ResponseController.ok(res, 'Login successful', result);
+  } catch (error) {
+    logger.error('Login error:', error);
+    
+    if (error instanceof Error && error.message === 'Invalid credentials') {
+      return ResponseController.badRequest(res, 'Invalid email or password');
+    }
+    
+    return ResponseController.serverError(res, 'Login failed');
+  }
+};

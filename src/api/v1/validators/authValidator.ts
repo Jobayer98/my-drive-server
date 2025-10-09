@@ -28,3 +28,20 @@ export const validateRegister = (req: Request, res: Response, next: NextFunction
 
   next();
 };
+
+export const validateLogin = (req: Request, res: Response, next: NextFunction) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    ResponseController.badRequest(res, 'Email and password are required');
+    return;
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    ResponseController.badRequest(res, 'Invalid email format');
+    return;
+  }
+
+  next();
+};
