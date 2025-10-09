@@ -4,7 +4,8 @@ import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
 import { limiter } from './config/rateLimiter';
 import { specs } from './config/swagger';
-import { requestLogger } from './middleware/requestLogger';
+import { requestLogger } from './middlewares/requestLogger';
+import routes from './api/v1/routes';
 
 const app = express();
 
@@ -20,6 +21,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 
 // Routes
-// app.use('/api', routes);
+app.use('/api/v1', routes);
 
 export default app;
