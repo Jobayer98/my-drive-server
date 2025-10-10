@@ -1,12 +1,35 @@
 import { Router } from 'express';
+import multer from 'multer';
 import {
   getUserFiles,
   getUserFileStats,
   getFilePresignedUrl,
+  uploadFiles,
 } from '../controllers/fileController';
 import { authenticateToken } from '../middlewares/authMiddleware';
 
 const router = Router();
+
+// Configure multer for file uploads
+const upload = multer({
+  storage: multer.memoryStorage(), // Store files in memory for S3 upload
+  limits: {
+    fileSize: parseInt(process.env.MAX_FILE_SIZE || '52428800'), // 50MB default
+    files: parseInt(process.env.MAX_FILES_PER_REQUEST || '10'), // 10 files max
+  },
+  fileFilter: (_req, file, cb) => {
+    // Basic file type validation (more comprehensive validation in controller)
+    const allowedMimeTypes = (process.env.ALLOWED_MIME_TYPES || 
+      'image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .split(',');
+    
+    if (allowedMimeTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type ${file.mimetype} is not allowed`));
+    }
+  },
+});
 
 /**
  * @swagger
@@ -119,6 +142,7 @@ const router = Router();
  *       properties:
  *         presignedUrl:
  *           type: string
+ *           description: Temporary URL for direct file access
  *           example: "https://s3.amazonaws.com/bucket/file?signature=..."
  *         expiresIn:
  *           type: number
@@ -126,7 +150,107 @@ const router = Router();
  *           example: 3600
  *         fileName:
  *           type: string
+ *           description: Name of the file
  *           example: "document.pdf"
+ *         fileSize:
+ *           type: number
+ *           description: File size in bytes
+ *           example: 1048576
+ *         mimeType:
+ *           type: string
+ *           description: MIME type of the file
+ *           example: "application/pdf"
+ *
+ *     UploadResult:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *           description: Database record ID for the uploaded file
+ *           example: "507f1f77bcf86cd799439011"
+ *         s3Key:
+ *           type: string
+ *           description: S3 object key for the uploaded file
+ *           example: "uploads/user123/document_20240115_103000_abc123.pdf"
+ *         fileName:
+ *           type: string
+ *           description: Generated unique filename
+ *           example: "document_20240115_103000_abc123.pdf"
+ *         originalName:
+ *           type: string
+ *           description: Original filename from upload
+ *           example: "My Document.pdf"
+ *         fileSize:
+ *           type: number
+ *           description: File size in bytes
+ *           example: 1048576
+ *         mimeType:
+ *           type: string
+ *           description: MIME type of the file
+ *           example: "application/pdf"
+ *         fileUrl:
+ *           type: string
+ *           description: Temporary access URL for the uploaded file
+ *           example: "https://example-bucket.s3.amazonaws.com/uploads/user123/document.pdf?X-Amz-Algorithm=..."
+ *         uploadedAt:
+ *           type: string
+ *           format: date-time
+ *           description: Upload timestamp
+ *           example: "2024-01-15T10:30:00.000Z"
+ *
+ *     UploadResponse:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *           description: Whether the upload operation was successful
+ *           example: true
+ *         message:
+ *           type: string
+ *           description: Response message
+ *           example: "Files uploaded successfully"
+ *         data:
+ *           type: object
+ *           properties:
+ *             files:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/UploadResult'
+ *               description: Array of successfully uploaded files
+ *             uploadedCount:
+ *               type: number
+ *               description: Number of successfully uploaded files
+ *               example: 2
+ *             failedCount:
+ *               type: number
+ *               description: Number of failed uploads (if any)
+ *               example: 0
+ *             totalCount:
+ *               type: number
+ *               description: Total number of files in the request
+ *               example: 2
+ *             errors:
+ *               type: array
+ *               items:
+ *                 type: string
+ *               description: Array of error messages for failed uploads
+ *               example: []
+ *
+ *     ErrorResponse:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *           example: false
+ *         message:
+ *           type: string
+ *           example: "Error message"
+ *         error:
+ *           type: string
+ *           example: "ERROR_CODE"
+ *         data:
+ *           type: object
+ *           description: Additional error details (optional)
  */
 
 /**
@@ -308,5 +432,198 @@ router.get('/stats', authenticateToken, getUserFileStats);
  *         description: Server error
  */
 router.get('/:fileId/presigned-url', authenticateToken, getFilePresignedUrl);
+
+/**
+ * @swagger
+ * /api/v1/files/upload:
+ *   post:
+ *     summary: Upload single or multiple files to S3
+ *     description: |
+ *       Upload one or more files to AWS S3 with automatic file validation, 
+ *       unique filename generation, and database record creation.
+ *       
+ *       **File Requirements:**
+ *       - Maximum file size: 50MB (configurable)
+ *       - Maximum files per request: 10 (configurable)
+ *       - Supported formats: Images (JPEG, PNG, GIF, WebP), Documents (PDF, DOC, DOCX, XLS, XLSX), Text files
+ *       
+ *       **Upload Options:**
+ *       - `folder`: Custom folder path within user's S3 directory (default: "uploads")
+ *       - `tags`: Array of tags to associate with uploaded files
+ *       - `makePublic`: Whether to make files publicly accessible (default: false)
+ *       - `continueOnError`: Whether to continue uploading remaining files if one fails (default: true)
+ *     tags:
+ *       - Files
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               files:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 description: Files to upload (single file or multiple files)
+ *               folder:
+ *                 type: string
+ *                 description: Custom folder path (optional)
+ *                 example: "documents"
+ *               tags:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Tags to associate with files (optional)
+ *                 example: ["work", "important"]
+ *               makePublic:
+ *                 type: boolean
+ *                 description: Make files publicly accessible (optional)
+ *                 example: false
+ *               continueOnError:
+ *                 type: boolean
+ *                 description: Continue uploading if one file fails (optional)
+ *                 example: true
+ *             required:
+ *               - files
+ *     responses:
+ *       200:
+ *         description: Files uploaded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/UploadResponse'
+ *             examples:
+ *               single_file_success:
+ *                 summary: Single file upload success
+ *                 value:
+ *                   success: true
+ *                   message: "Files uploaded successfully"
+ *                   data:
+ *                     files:
+ *                       - id: "507f1f77bcf86cd799439011"
+ *                         s3Key: "uploads/user123/document_20240115_103000_abc123.pdf"
+ *                         fileName: "document_20240115_103000_abc123.pdf"
+ *                         originalName: "My Document.pdf"
+ *                         fileSize: 1048576
+ *                         mimeType: "application/pdf"
+ *                         fileUrl: "https://example-bucket.s3.amazonaws.com/uploads/user123/document.pdf?X-Amz-Algorithm=..."
+ *                         uploadedAt: "2024-01-15T10:30:00.000Z"
+ *                     uploadedCount: 1
+ *                     totalCount: 1
+ *               partial_success:
+ *                 summary: Partial upload success with errors
+ *                 value:
+ *                   success: true
+ *                   message: "Files uploaded with some errors"
+ *                   data:
+ *                     files:
+ *                       - id: "507f1f77bcf86cd799439011"
+ *                         s3Key: "uploads/user123/image_20240115_103000_def456.jpg"
+ *                         fileName: "image_20240115_103000_def456.jpg"
+ *                         originalName: "photo.jpg"
+ *                         fileSize: 2097152
+ *                         mimeType: "image/jpeg"
+ *                         fileUrl: "https://example-bucket.s3.amazonaws.com/uploads/user123/image.jpg?X-Amz-Algorithm=..."
+ *                         uploadedAt: "2024-01-15T10:30:00.000Z"
+ *                     uploadedCount: 1
+ *                     failedCount: 1
+ *                     totalCount: 2
+ *                     errors:
+ *                       - "Failed to upload large_file.zip: File size exceeds limit"
+ *       400:
+ *         description: Bad request - validation errors or invalid input
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             examples:
+ *               no_files:
+ *                 summary: No files provided
+ *                 value:
+ *                   success: false
+ *                   message: "No files provided for upload"
+ *                   error: "BAD_REQUEST"
+ *               validation_failed:
+ *                 summary: File validation failed
+ *                 value:
+ *                   success: false
+ *                   message: "File validation failed"
+ *                   error: "BAD_REQUEST"
+ *                   data:
+ *                     errors:
+ *                       - "File 'large_file.zip' exceeds maximum size limit of 50MB"
+ *                       - "File 'script.exe' has invalid file type"
+ *                     validFiles: 1
+ *                     totalFiles: 3
+ *               file_size_limit:
+ *                 summary: File size limit exceeded
+ *                 value:
+ *                   success: false
+ *                   message: "File size or quota limit exceeded"
+ *                   error: "BAD_REQUEST"
+ *                   data:
+ *                     error: "File size exceeds the maximum allowed limit"
+ *       401:
+ *         description: Unauthorized - authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "User authentication required"
+ *               error: "UNAUTHORIZED"
+ *       413:
+ *         description: Payload too large - file size exceeds server limits
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "File size exceeds server limit"
+ *               error: "PAYLOAD_TOO_LARGE"
+ *       500:
+ *         description: Internal server error - S3 or database issues
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             examples:
+ *               s3_config_error:
+ *                 summary: S3 configuration error
+ *                 value:
+ *                   success: false
+ *                   message: "Storage service configuration error. Please contact support."
+ *                   error: "INTERNAL_SERVER_ERROR"
+ *               s3_access_error:
+ *                 summary: S3 access error
+ *                 value:
+ *                   success: false
+ *                   message: "Storage service access error. Please contact support."
+ *                   error: "INTERNAL_SERVER_ERROR"
+ *               network_error:
+ *                 summary: Network error
+ *                 value:
+ *                   success: false
+ *                   message: "Network error occurred during upload. Please try again."
+ *                   error: "INTERNAL_SERVER_ERROR"
+ *               complete_failure:
+ *                 summary: All files failed to upload
+ *                 value:
+ *                   success: false
+ *                   message: "Failed to upload any files"
+ *                   error: "INTERNAL_SERVER_ERROR"
+ *                   data:
+ *                     errors:
+ *                       - "Failed to upload document.pdf: S3 access denied"
+ *                       - "Failed to upload image.jpg: Network timeout"
+ *                     totalCount: 2
+ */
+router.post('/upload', authenticateToken, upload.array('files', 10), uploadFiles);
 
 export default router;

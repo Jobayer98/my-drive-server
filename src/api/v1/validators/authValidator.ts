@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
 import { ResponseController } from '../../../utils/responseController';
-import logger from '../../../utils/logger';
 
 export const validateRegister = (
   req: Request,

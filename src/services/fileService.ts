@@ -2,10 +2,12 @@ import {
   S3Client,
   GetObjectCommand,
   HeadObjectCommand,
+  PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import File from '../models/File';
 import logger from '../utils/logger';
+import { generateUniqueFilename } from '../utils/fileValidation';
 
 export interface FileListItem {
   id: string;
@@ -23,6 +25,23 @@ export interface FileListResponse {
   files: FileListItem[];
   totalCount: number;
   totalSize: number;
+}
+
+export interface UploadResult {
+  id: string;
+  s3Key: string;
+  fileName: string;
+  originalName: string;
+  fileSize: number;
+  mimeType: string;
+  fileUrl: string;
+  uploadedAt: Date;
+}
+
+export interface UploadResponse {
+  success: boolean;
+  files: UploadResult[];
+  errors: string[];
 }
 
 export class FileService {
@@ -152,19 +171,52 @@ export class FileService {
     expirationSeconds: number = 3600
   ): Promise<string> {
     try {
+      // Validate input parameters
+      if (!s3Key || typeof s3Key !== 'string') {
+        throw new Error('Invalid S3 key provided');
+      }
+
+      // Validate expiration time (5 minutes to 24 hours)
+      const validatedExpiration = Math.min(
+        Math.max(expirationSeconds, 300),
+        86400
+      );
+
+      if (validatedExpiration !== expirationSeconds) {
+        logger.warn(
+          `Expiration time adjusted from ${expirationSeconds} to ${validatedExpiration} seconds for S3 key: ${s3Key}`
+        );
+      }
+
+      // Create the GetObject command
       const command = new GetObjectCommand({
         Bucket: this.bucketName,
         Key: s3Key,
       });
 
+      // Generate the presigned URL
       const presignedUrl = await getSignedUrl(this.s3Client, command, {
-        expiresIn: expirationSeconds,
+        expiresIn: validatedExpiration,
       });
+
+      logger.debug(
+        `Generated presigned URL for S3 key: ${s3Key}, expires in: ${validatedExpiration}s`
+      );
 
       return presignedUrl;
     } catch (error) {
-      logger.error(`Error generating presigned URL for key ${s3Key}:`, error);
-      throw new Error('Failed to generate presigned URL');
+      logger.error(`Error generating presigned URL for key ${s3Key}:`, {
+        error: error instanceof Error ? error.message : error,
+        s3Key,
+        expirationSeconds,
+      });
+
+      // Throw a more specific error message
+      if (error instanceof Error && error.message.includes('Invalid S3 key')) {
+        throw error;
+      }
+
+      throw new Error('Failed to generate presigned URL for file access');
     }
   }
 
@@ -307,6 +359,218 @@ export class FileService {
     } catch (error) {
       logger.error('Error getting user file stats:', error);
       throw new Error('Failed to get file statistics');
+    }
+  }
+
+  /**
+   * Upload single file to S3 and create database record
+   */
+  async uploadFile(
+    userId: string,
+    file: Express.Multer.File,
+    options: {
+      folder?: string;
+      tags?: string[];
+      makePublic?: boolean;
+    } = {}
+  ): Promise<UploadResult> {
+    try {
+      const { folder = 'uploads', tags = [], makePublic = false } = options;
+
+      // Generate unique filename
+      const uniqueFileName = generateUniqueFilename(file.originalname);
+
+      // Create S3 key with user folder structure
+      const s3Key = `${folder}/${userId}/${uniqueFileName}`;
+
+      logger.info(`Uploading file to S3:`, {
+        userId,
+        originalName: file.originalname,
+        fileName: uniqueFileName,
+        s3Key,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+      });
+
+      // Upload to S3
+      const uploadCommand = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: s3Key,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        ContentLength: file.size,
+        Metadata: {
+          userId,
+          originalName: file.originalname,
+          uploadedAt: new Date().toISOString(),
+        },
+        // Set ACL based on makePublic option
+        ...(makePublic && { ACL: 'public-read' }),
+      });
+
+      await this.s3Client.send(uploadCommand);
+
+      logger.info(`Successfully uploaded file to S3: ${s3Key}`);
+
+      // Create database record
+      const fileRecord = new File({
+        userId,
+        fileName: uniqueFileName,
+        originalName: file.originalname,
+        s3Key,
+        s3Bucket: this.bucketName,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+        uploadedAt: new Date(),
+        lastModified: new Date(),
+        tags,
+        isDeleted: false,
+      });
+
+      const savedFile = await fileRecord.save();
+
+      logger.info(`Created database record for file: ${savedFile._id}`);
+
+      // Generate file URL (presigned URL for private files, direct URL for public)
+      let fileUrl: string;
+      if (makePublic) {
+        fileUrl = `https://${this.bucketName}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
+      } else {
+        fileUrl = await this.generatePresignedUrl(s3Key, 3600); // 1 hour default
+      }
+
+      return {
+        id: savedFile._id.toString(),
+        s3Key,
+        fileName: uniqueFileName,
+        originalName: file.originalname,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+        fileUrl,
+        uploadedAt: savedFile.uploadedAt,
+      };
+    } catch (error) {
+      logger.error('Error uploading file:', {
+        error: error instanceof Error ? error.message : error,
+        userId,
+        fileName: file.originalname,
+        fileSize: file.size,
+      });
+
+      // Handle specific S3 errors
+      if (error instanceof Error) {
+        if (error.message.includes('NoSuchBucket')) {
+          throw new Error('S3 bucket not found. Please check configuration.');
+        }
+        if (error.message.includes('AccessDenied')) {
+          throw new Error(
+            'Access denied to S3 bucket. Please check permissions.'
+          );
+        }
+        if (error.message.includes('InvalidBucketName')) {
+          throw new Error('Invalid S3 bucket name configuration.');
+        }
+      }
+
+      throw new Error(`Failed to upload file: ${file.originalname}`);
+    }
+  }
+
+  /**
+   * Upload multiple files to S3 and create database records
+   */
+  async uploadFiles(
+    userId: string,
+    files: Express.Multer.File[],
+    options: {
+      folder?: string;
+      tags?: string[];
+      makePublic?: boolean;
+      continueOnError?: boolean;
+    } = {}
+  ): Promise<UploadResponse> {
+    const { continueOnError = true } = options;
+    const results: UploadResult[] = [];
+    const errors: string[] = [];
+
+    logger.info(`Starting batch upload for user ${userId}:`, {
+      fileCount: files.length,
+      totalSize: files.reduce((sum, file) => sum + file.size, 0),
+    });
+
+    for (const file of files) {
+      try {
+        const result = await this.uploadFile(userId, file, options);
+        results.push(result);
+
+        logger.debug(`Successfully uploaded file: ${file.originalname}`);
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : `Failed to upload ${file.originalname}`;
+        errors.push(errorMessage);
+
+        logger.error(`Failed to upload file: ${file.originalname}`, error);
+
+        // If not continuing on error, stop the process
+        if (!continueOnError) {
+          break;
+        }
+      }
+    }
+
+    const success = errors.length === 0;
+
+    logger.info(`Batch upload completed for user ${userId}:`, {
+      successful: results.length,
+      failed: errors.length,
+      success,
+    });
+
+    return {
+      success,
+      files: results,
+      errors,
+    };
+  }
+
+  /**
+   * Delete file from S3 and mark as deleted in database
+   */
+  async deleteFile(userId: string, fileId: string): Promise<boolean> {
+    try {
+      // Find the file record
+      const file = await File.findOne({
+        _id: fileId,
+        userId,
+        isDeleted: false,
+      });
+
+      if (!file) {
+        throw new Error('File not found or already deleted');
+      }
+
+      // Mark as deleted in database (soft delete)
+      await File.findByIdAndUpdate(fileId, {
+        isDeleted: true,
+        deletedAt: new Date(),
+      });
+
+      logger.info(`Marked file as deleted in database: ${fileId}`);
+
+      // Note: We're doing soft delete, so we don't actually delete from S3
+      // This allows for potential recovery. To actually delete from S3,
+      // you would use DeleteObjectCommand here.
+
+      return true;
+    } catch (error) {
+      logger.error('Error deleting file:', {
+        error: error instanceof Error ? error.message : error,
+        userId,
+        fileId,
+      });
+      throw new Error('Failed to delete file');
     }
   }
 }
