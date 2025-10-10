@@ -6,15 +6,17 @@ export interface AuthenticatedRequest extends Request {
   user?: {
     userId: string;
     email: string;
+    jti?: string;
   };
 }
 
-export const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+export const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    return ResponseController.badRequest(res, 'Access token required');
+    ResponseController.badRequest(res, 'Access token required');
+    return;
   }
 
   try {
@@ -22,6 +24,7 @@ export const authenticateToken = (req: AuthenticatedRequest, res: Response, next
     req.user = decoded;
     next();
   } catch (error) {
-    return ResponseController.badRequest(res, 'Invalid or expired token');
+    ResponseController.badRequest(res, 'Invalid or expired token');
+    return;
   }
 };

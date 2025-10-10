@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, logout } from '../controllers/authController';
+import { register, login, logout, refreshToken } from '../controllers/authController';
 import { validateRegister, validateLogin } from '../validators/authValidator';
 import { authenticateToken } from '../middleware/authMiddleware';
 
@@ -206,5 +206,45 @@ router.post('/login', validateLogin, login);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/logout', authenticateToken, logout);
+
+/**
+ * @swagger
+ * /api/v1/auth/refresh:
+ *   post:
+ *     summary: Refresh access token
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - refreshToken
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *                 example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *     responses:
+ *       200:
+ *         description: Token refreshed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       400:
+ *         description: Invalid or expired refresh token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/refresh', refreshToken);
 
 export default router;

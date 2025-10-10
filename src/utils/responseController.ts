@@ -27,7 +27,7 @@ export class ResponseController {
     const response: SuccessResponse<T> = {
       success: true,
       message,
-      ...(data && { data })
+      ...(data && { data }),
     };
     return res.status(200).json(response);
   }
@@ -35,11 +35,15 @@ export class ResponseController {
   /**
    * Created (201): Resource creation success response
    */
-  static created<T>(res: Response, message: string = 'Resource created successfully', data?: T): Response {
+  static created<T>(
+    res: Response,
+    message: string = 'Resource created successfully',
+    data?: T
+  ): Response {
     const response: SuccessResponse<T> = {
       success: true,
       message,
-      ...(data && { data })
+      ...(data && { data }),
     };
     return res.status(201).json(response);
   }
@@ -47,11 +51,15 @@ export class ResponseController {
   /**
    * Bad Request (400): Client-side error with validation details
    */
-  static badRequest(res: Response, message: string = 'Bad request', details?: any): Response {
+  static badRequest(
+    res: Response,
+    message: string = 'Bad request',
+    details?: any
+  ): Response {
     const response: ErrorResponse = {
       success: false,
       message,
-      ...(details && { error: { details } })
+      ...(details && { error: { details } }),
     };
     return res.status(400).json(response);
   }
@@ -59,11 +67,15 @@ export class ResponseController {
   /**
    * Internal Server Error (500): Server-side error response
    */
-  static serverError(res: Response, message: string = 'Internal server error', error?: any): Response {
+  static serverError(
+    res: Response,
+    message: string = 'Internal server error',
+    error?: any
+  ): Response {
     const response: ErrorResponse = {
       success: false,
       message,
-      ...(error && { error: { code: 'INTERNAL_ERROR', details: error } })
+      ...(error && { error: { code: 'INTERNAL_ERROR', details: error } }),
     };
     return res.status(500).json(response);
   }
@@ -71,11 +83,25 @@ export class ResponseController {
   /**
    * Conflict (409): Resource conflict error
    */
-  static conflict(res: Response, message: string = 'Resource conflict'): Response {
+  static conflict(
+    res: Response,
+    message: string = 'Resource conflict'
+  ): Response {
     const response: ErrorResponse = {
       success: false,
       message,
     };
     return res.status(409).json(response);
+  }
+
+  static unauthorized(
+    res: Response,
+    message: string = 'Unauthorized'
+  ): Response {
+    const response: ErrorResponse = {
+      success: false,
+      message,
+    };
+    return res.status(401).json(response);
   }
 }
