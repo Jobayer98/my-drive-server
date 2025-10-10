@@ -104,4 +104,15 @@ export class ResponseController {
     };
     return res.status(401).json(response);
   }
+
+  static notFound(
+    res: Response,
+    message: string = 'Resource not found'
+  ): Response {
+    const response: ErrorResponse = {
+      success: false,
+      message,
+    };
+    return res.status(404).json(response);
+  }
 }

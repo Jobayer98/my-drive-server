@@ -1,7 +1,12 @@
 import { Router } from 'express';
-import { register, login, logout, refreshToken } from '../controllers/authController';
+import {
+  register,
+  login,
+  logout,
+  refreshToken,
+} from '../controllers/authController';
 import { validateRegister, validateLogin } from '../validators/authValidator';
-import { authenticateToken } from '../middleware/authMiddleware';
+import { authenticateToken } from '../middlewares/authMiddleware';
 
 const router = Router();
 
@@ -33,7 +38,7 @@ const router = Router();
  *           type: string
  *           minLength: 2
  *           example: John Doe
- *     
+ *
  *     AuthResponse:
  *       type: object
  *       properties:
@@ -70,7 +75,7 @@ const router = Router();
  *             refreshToken:
  *               type: string
  *               example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *     
+ *
  *     ErrorResponse:
  *       type: object
  *       properties:

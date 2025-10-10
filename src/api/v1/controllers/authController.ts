@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { AuthService } from '../../../services/authService';
 import { ResponseController } from '../../../utils/responseController';
-import { AuthenticatedRequest } from '../middleware/authMiddleware';
+import { AuthenticatedRequest } from '../middlewares/authMiddleware';
 import logger from '../../../utils/logger';
 
 const authService = new AuthService();
