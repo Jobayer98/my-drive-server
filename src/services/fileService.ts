@@ -135,8 +135,9 @@ export class FileService {
           // Generate presigned URL if requested
           if (includePresignedUrls) {
             try {
-              fileItem.presignedUrl = await this.generatePresignedUrl(
-                file.s3Key,
+              fileItem.presignedUrl = await this.generatePresignedUrlForUser(
+                file._id.toString(),
+                userId,
                 presignedUrlExpiration
               );
             } catch (error) {
@@ -218,6 +219,72 @@ export class FileService {
 
       throw new Error('Failed to generate presigned URL for file access');
     }
+  }
+
+  /**
+   * Check if a user can access a given file.
+   * Access is granted if the user is the owner, or the file
+   * has been explicitly shared with the user.
+   */
+  async canUserAccessFile(userId: string, fileId: string): Promise<boolean> {
+    try {
+      const fileRecord = await File.findOne({
+        _id: fileId,
+        isDeleted: false,
+      })
+        .select(['userId', 'sharedWith'])
+        .lean();
+
+      if (!fileRecord) {
+        return false;
+      }
+
+      // Owner check
+      const isOwner = fileRecord.userId.toString() === userId;
+      if (isOwner) return true;
+
+      // Shared-with check (optional field)
+      const sharedWith: any[] = (fileRecord as any).sharedWith || [];
+      return Array.isArray(sharedWith)
+        ? sharedWith.map((id) => id.toString()).includes(userId)
+        : false;
+    } catch (error) {
+      logger.error('Error checking file access permissions', {
+        error: error instanceof Error ? error.message : error,
+        userId,
+        fileId,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Generate a presigned URL for a user if they have access to the file.
+   * Enforces owner-only access unless the file has been explicitly shared.
+   */
+  async generatePresignedUrlForUser(
+    fileId: string,
+    userId: string,
+    expirationSeconds: number = 3600
+  ): Promise<string> {
+    // Verify access first
+    const hasAccess = await this.canUserAccessFile(userId, fileId);
+    if (!hasAccess) {
+      throw new Error(
+        'Access denied: You do not have permission to access this file'
+      );
+    }
+
+    // Load file to get s3Key
+    const fileRecord = await File.findOne({ _id: fileId, isDeleted: false })
+      .select(['s3Key'])
+      .lean();
+
+    if (!fileRecord || !fileRecord.s3Key) {
+      throw new Error('File not found or storage key missing');
+    }
+
+    return this.generatePresignedUrl(fileRecord.s3Key, expirationSeconds);
   }
 
   /**
@@ -375,13 +442,12 @@ export class FileService {
     } = {}
   ): Promise<UploadResult> {
     try {
-      const { folder = 'uploads', tags = [], makePublic = false } = options;
+      const { tags = [] } = options;
 
       // Generate unique filename
       const uniqueFileName = generateUniqueFilename(file.originalname);
 
-      // Create S3 key with user folder structure
-      const s3Key = `${folder}/${userId}/${uniqueFileName}`;
+      const s3Key = `${userId}/${uniqueFileName}`;
 
       logger.info(`Uploading file to S3:`, {
         userId,
@@ -404,8 +470,7 @@ export class FileService {
           originalName: file.originalname,
           uploadedAt: new Date().toISOString(),
         },
-        // Set ACL based on makePublic option
-        ...(makePublic && { ACL: 'public-read' }),
+        // Explicitly rely on bucket default ACL (private). Do NOT set public ACLs.
       });
 
       await this.s3Client.send(uploadCommand);
@@ -432,12 +497,8 @@ export class FileService {
       logger.info(`Created database record for file: ${savedFile._id}`);
 
       // Generate file URL (presigned URL for private files, direct URL for public)
-      let fileUrl: string;
-      if (makePublic) {
-        fileUrl = `https://${this.bucketName}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
-      } else {
-        fileUrl = await this.generatePresignedUrl(s3Key, 3600); // 1 hour default
-      }
+      // Always generate a presigned URL (files are private by default)
+      const fileUrl = await this.generatePresignedUrl(s3Key, 3600); // 1 hour default
 
       return {
         id: savedFile._id.toString(),
