@@ -403,12 +403,7 @@ export const uploadFiles = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // Parse upload options from request body
-    const {
-      folder = 'uploads',
-      tags = [],
-      makePublic = false,
-      continueOnError = true,
-    } = req.body;
+    const { tags = [], makePublic = false, continueOnError = true } = req.body;
 
     // Sanitize tags
     const sanitizedTags = Array.isArray(tags)
@@ -417,7 +412,6 @@ export const uploadFiles = async (req: AuthenticatedRequest, res: Response) => {
 
     // Upload files using FileService
     const uploadResult = await fileService.uploadFiles(userId, files, {
-      folder: typeof folder === 'string' ? folder : 'uploads',
       tags: sanitizedTags,
       makePublic: makePublic === 'true' || makePublic === true,
       continueOnError: continueOnError === 'true' || continueOnError === true,

@@ -19,10 +19,11 @@ const upload = multer({
   },
   fileFilter: (_req, file, cb) => {
     // Basic file type validation (more comprehensive validation in controller)
-    const allowedMimeTypes = (process.env.ALLOWED_MIME_TYPES || 
-      'image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-      .split(',');
-    
+    const allowedMimeTypes = (
+      process.env.ALLOWED_MIME_TYPES ||
+      'image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ).split(',');
+
     if (allowedMimeTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
@@ -439,19 +440,16 @@ router.get('/:fileId/presigned-url', authenticateToken, getFilePresignedUrl);
  *   post:
  *     summary: Upload single or multiple files to S3
  *     description: |
- *       Upload one or more files to AWS S3 with automatic file validation, 
+ *       Upload one or more files to AWS S3 with automatic file validation,
  *       unique filename generation, and database record creation.
- *       
+ *
  *       **File Requirements:**
  *       - Maximum file size: 50MB (configurable)
  *       - Maximum files per request: 10 (configurable)
  *       - Supported formats: Images (JPEG, PNG, GIF, WebP), Documents (PDF, DOC, DOCX, XLS, XLSX), Text files
- *       
+ *
  *       **Upload Options:**
- *       - `folder`: Custom folder path within user's S3 directory (default: "uploads")
  *       - `tags`: Array of tags to associate with uploaded files
- *       - `makePublic`: Whether to make files publicly accessible (default: false)
- *       - `continueOnError`: Whether to continue uploading remaining files if one fails (default: true)
  *     tags:
  *       - Files
  *     security:
@@ -469,24 +467,12 @@ router.get('/:fileId/presigned-url', authenticateToken, getFilePresignedUrl);
  *                   type: string
  *                   format: binary
  *                 description: Files to upload (single file or multiple files)
- *               folder:
- *                 type: string
- *                 description: Custom folder path (optional)
- *                 example: "documents"
  *               tags:
  *                 type: array
  *                 items:
  *                   type: string
  *                 description: Tags to associate with files (optional)
  *                 example: ["work", "important"]
- *               makePublic:
- *                 type: boolean
- *                 description: Make files publicly accessible (optional)
- *                 example: false
- *               continueOnError:
- *                 type: boolean
- *                 description: Continue uploading if one file fails (optional)
- *                 example: true
  *             required:
  *               - files
  *     responses:
@@ -624,6 +610,11 @@ router.get('/:fileId/presigned-url', authenticateToken, getFilePresignedUrl);
  *                       - "Failed to upload image.jpg: Network timeout"
  *                     totalCount: 2
  */
-router.post('/upload', authenticateToken, upload.array('files', 10), uploadFiles);
+router.post(
+  '/upload',
+  authenticateToken,
+  upload.array('files', 10),
+  uploadFiles
+);
 
 export default router;
