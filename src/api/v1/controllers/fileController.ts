@@ -235,6 +235,78 @@ export const getUserFileStats = async (
 };
 
 /**
+ * Get detailed information for a specific file by ID
+ */
+export const getFileDetails = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const userId = req.user?.userId;
+    const { id: fileId } = req.params;
+
+    // Validate authentication
+    if (!userId) {
+      return ResponseController.unauthorized(res, 'User authentication required');
+    }
+
+    // Validate file ID format
+    const mongoose = require('mongoose');
+    if (!fileId || typeof fileId !== 'string' || !mongoose.Types.ObjectId.isValid(fileId)) {
+      return ResponseController.badRequest(res, 'Valid file ID is required');
+    }
+
+    // Verify access permissions (owner-only or explicitly shared)
+    const hasAccess = await fileService.canUserAccessFile(userId, fileId);
+    if (!hasAccess) {
+      return ResponseController.notFound(res, 'File not found or access denied');
+    }
+
+    // Fetch file record
+    const File = require('../../../models/File').default;
+    const fileRecord = await File.findOne({ _id: fileId, isDeleted: false })
+      .lean();
+
+    if (!fileRecord) {
+      return ResponseController.notFound(res, 'File not found');
+    }
+
+    // Build response payload with relevant details
+    const details = {
+      id: fileRecord._id.toString(),
+      fileName: fileRecord.fileName,
+      originalName: fileRecord.originalName,
+      fileSize: fileRecord.fileSize,
+      mimeType: fileRecord.mimeType,
+      uploadedAt: fileRecord.uploadedAt,
+      lastModified: fileRecord.lastModified,
+      tags: fileRecord.tags ?? [],
+      metadata: fileRecord.metadata ?? {},
+    };
+
+    return ResponseController.ok(res, 'File details retrieved successfully', details);
+  } catch (error) {
+    logger.error('Error retrieving file details:', {
+      error: error instanceof Error ? error.message : error,
+      fileId: req.params.id,
+      userId: req.user?.userId,
+    });
+
+    // Handle specific error types
+    if (error instanceof Error) {
+      if (error.message.includes('Invalid') || error.message.includes('ID')) {
+        return ResponseController.badRequest(res, 'Invalid file identifier');
+      }
+      if (error.message.includes('AWS') || error.message.includes('S3')) {
+        return ResponseController.serverError(res, 'File storage service error');
+      }
+    }
+
+    return ResponseController.serverError(res, 'Failed to retrieve file details');
+  }
+};
+
+/**
  * Generate a presigned URL for a specific file
  */
 export const getFilePresignedUrl = async (

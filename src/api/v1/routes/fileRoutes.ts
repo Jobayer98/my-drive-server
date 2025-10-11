@@ -4,6 +4,7 @@ import {
   getUserFiles,
   getUserFileStats,
   getFilePresignedUrl,
+  getFileDetails,
   uploadFiles,
 } from '../controllers/fileController';
 import { authenticateToken } from '../middlewares/authMiddleware';
@@ -433,6 +434,129 @@ router.get('/stats', authenticateToken, getUserFileStats);
  *         description: Server error
  */
 router.get('/:fileId/presigned-url', authenticateToken, getFilePresignedUrl);
+
+/**
+ * @swagger
+ * /api/v1/files/{id}:
+ *   get:
+ *     summary: Get detailed information about a specific file
+ *     description: |
+ *       Retrieve detailed information for a file owned by the authenticated user.
+ *       Access is restricted to the file owner or users explicitly shared on the file.
+ *     tags:
+ *       - Files
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: File ID (MongoDB ObjectId)
+ *         example: "507f1f77bcf86cd799439011"
+ *     responses:
+ *       200:
+ *         description: File details retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "File details retrieved successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       description: Unique file identifier
+ *                       example: "507f1f77bcf86cd799439011"
+ *                     fileName:
+ *                       type: string
+ *                       description: Current file name
+ *                       example: "document_2024.pdf"
+ *                     originalName:
+ *                       type: string
+ *                       description: Original file name when uploaded
+ *                       example: "My Document.pdf"
+ *                     fileSize:
+ *                       type: number
+ *                       description: File size in bytes
+ *                       example: 1048576
+ *                     mimeType:
+ *                       type: string
+ *                       description: MIME type of the file
+ *                       example: "application/pdf"
+ *                     uploadedAt:
+ *                       type: string
+ *                       format: date-time
+ *                       description: Upload timestamp
+ *                       example: "2024-01-15T10:30:00.000Z"
+ *                     lastModified:
+ *                       type: string
+ *                       format: date-time
+ *                       description: Last modification timestamp
+ *                       example: "2024-01-15T10:30:00.000Z"
+ *                     tags:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       description: File tags
+ *                       example: ["work", "important"]
+ *                     metadata:
+ *                       type: object
+ *                       additionalProperties: true
+ *                       description: Additional metadata related to the file
+ *                       example:
+ *                         width: 1920
+ *                         height: 1080
+ *       401:
+ *         description: Unauthorized - authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "User authentication required"
+ *               error: "UNAUTHORIZED"
+ *       404:
+ *         description: File not found or access denied
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "File not found or access denied"
+ *               error: "NOT_FOUND"
+ *       500:
+ *         description: Internal server error - database or storage issues
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             examples:
+ *               db_error:
+ *                 summary: Database error
+ *                 value:
+ *                   success: false
+ *                   message: "Failed to retrieve file details"
+ *                   error: "INTERNAL_SERVER_ERROR"
+ *               storage_error:
+ *                 summary: Storage service error
+ *                 value:
+ *                   success: false
+ *                   message: "File storage service error"
+ *                   error: "INTERNAL_SERVER_ERROR"
+ */
+// Get detailed information about a specific file
+router.get('/:id', authenticateToken, getFileDetails);
 
 /**
  * @swagger
