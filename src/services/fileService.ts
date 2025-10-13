@@ -3,6 +3,7 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import File from '../models/File';
@@ -632,6 +633,134 @@ export class FileService {
         fileId,
       });
       throw new Error('Failed to delete file');
+    }
+  }
+
+  /**
+   * Update file metadata (tags, metadata) for a user's file
+   */
+  async updateFileMetadata(
+    userId: string,
+    fileId: string,
+    updates: {
+      tags?: string[];
+      metadata?: Record<string, any>;
+    }
+  ): Promise<{
+    id: string;
+    fileName: string;
+    originalName: string;
+    fileSize: number;
+    mimeType: string;
+    uploadedAt: Date;
+    lastModified: Date;
+    tags: string[];
+    metadata: Record<string, any>;
+  } | null> {
+    try {
+      const file = await File.findOne({ _id: fileId, userId, isDeleted: false });
+      if (!file) {
+        return null;
+      }
+
+      // Validate and sanitize inputs
+      const nextUpdate: any = { lastModified: new Date() };
+
+      if (Array.isArray(updates.tags)) {
+        nextUpdate.tags = updates.tags
+          .filter((t) => typeof t === 'string')
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0);
+      }
+
+      if (updates.metadata && typeof updates.metadata === 'object' && !Array.isArray(updates.metadata)) {
+        nextUpdate.metadata = updates.metadata;
+      }
+
+      const updated = await File.findByIdAndUpdate(
+        fileId,
+        nextUpdate,
+        { new: true }
+      ).lean();
+
+      if (!updated) {
+        return null;
+      }
+
+      logger.info('Updated file metadata', {
+        userId,
+        fileId,
+        tagsUpdated: Array.isArray(nextUpdate.tags),
+        metadataUpdated: !!nextUpdate.metadata,
+      });
+
+      return {
+        id: updated._id.toString(),
+        fileName: updated.fileName,
+        originalName: updated.originalName,
+        fileSize: updated.fileSize,
+        mimeType: updated.mimeType,
+        uploadedAt: updated.uploadedAt,
+        lastModified: updated.lastModified,
+        tags: updated.tags ?? [],
+        metadata: updated.metadata ?? {},
+      };
+    } catch (error) {
+      logger.error('Error updating file metadata', {
+        error: error instanceof Error ? error.message : error,
+        userId,
+        fileId,
+      });
+      throw new Error('Failed to update file metadata');
+    }
+  }
+
+  /**
+   * Permanently delete a file from S3 and remove its DB record
+   */
+  async deleteFilePermanent(userId: string, fileId: string): Promise<boolean> {
+    try {
+      // Ensure ownership and file exists
+      const file = await File.findOne({ _id: fileId, userId, isDeleted: false });
+      if (!file) {
+        return false;
+      }
+
+      // Delete object from S3
+      await this.s3Client.send(
+        new DeleteObjectCommand({
+          Bucket: file.s3Bucket,
+          Key: file.s3Key,
+        })
+      );
+
+      logger.info('Deleted file from S3', {
+        userId,
+        fileId,
+        bucket: file.s3Bucket,
+        key: file.s3Key,
+      });
+
+      // Remove record from DB
+      const deleted = await File.findByIdAndDelete(fileId);
+      if (!deleted) {
+        // Fallback: mark as deleted to maintain consistency
+        await File.findByIdAndUpdate(fileId, {
+          isDeleted: true,
+          deletedAt: new Date(),
+        });
+        logger.warn('DB deletion failed; marked record as deleted', { userId, fileId });
+      }
+
+      logger.info('Removed file record from database', { userId, fileId });
+      return true;
+    } catch (error) {
+      logger.error('Error permanently deleting file', {
+        error: error instanceof Error ? error.message : error,
+        userId,
+        fileId,
+      });
+      throw new Error('Failed to permanently delete file');
     }
   }
 }

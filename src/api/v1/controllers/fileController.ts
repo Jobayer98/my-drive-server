@@ -307,6 +307,104 @@ export const getFileDetails = async (
 };
 
 /**
+ * Update file metadata (tags, metadata) for a specific file
+ */
+export const updateFileMetadata = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const userId = req.user?.userId;
+    const { id: fileId } = req.params;
+
+    if (!userId) {
+      return ResponseController.unauthorized(res, 'User authentication required');
+    }
+
+    const mongoose = require('mongoose');
+    if (!fileId || typeof fileId !== 'string' || !mongoose.Types.ObjectId.isValid(fileId)) {
+      return ResponseController.badRequest(res, 'Valid file ID is required');
+    }
+
+    const { tags, metadata } = req.body || {};
+
+    // Validate payload
+    if (tags !== undefined && !Array.isArray(tags)) {
+      return ResponseController.badRequest(res, 'Tags must be an array of strings');
+    }
+    if (metadata !== undefined && (typeof metadata !== 'object' || Array.isArray(metadata))) {
+      return ResponseController.badRequest(res, 'Metadata must be an object');
+    }
+
+    logger.info('Updating file metadata', {
+      userId,
+      fileId,
+      tagsCount: Array.isArray(tags) ? tags.length : undefined,
+      metadataKeys: metadata && typeof metadata === 'object' ? Object.keys(metadata) : [],
+    });
+
+    const updated = await fileService.updateFileMetadata(userId, fileId, {
+      tags,
+      metadata,
+    });
+
+    if (!updated) {
+      return ResponseController.notFound(res, 'File not found or access denied');
+    }
+
+    return ResponseController.ok(res, 'File metadata updated successfully', updated);
+  } catch (error) {
+    logger.error('Error updating file metadata:', {
+      error: error instanceof Error ? error.message : error,
+      userId: req.user?.userId,
+      fileId: req.params.id,
+      body: req.body,
+    });
+
+    return ResponseController.serverError(res, 'Failed to update file metadata');
+  }
+};
+
+/**
+ * Permanently delete a file (S3 object + DB record)
+ */
+export const deleteFile = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const userId = req.user?.userId;
+    const { id: fileId } = req.params;
+
+    if (!userId) {
+      return ResponseController.unauthorized(res, 'User authentication required');
+    }
+
+    const mongoose = require('mongoose');
+    if (!fileId || typeof fileId !== 'string' || !mongoose.Types.ObjectId.isValid(fileId)) {
+      return ResponseController.badRequest(res, 'Valid file ID is required');
+    }
+
+    logger.info('Deleting file permanently', { userId, fileId });
+
+    const deleted = await fileService.deleteFilePermanent(userId, fileId);
+    if (!deleted) {
+      return ResponseController.notFound(res, 'File not found or access denied');
+    }
+
+    return res.status(204).send();
+  } catch (error) {
+    logger.error('Error permanently deleting file:', {
+      error: error instanceof Error ? error.message : error,
+      userId: req.user?.userId,
+      fileId: req.params.id,
+    });
+
+    return ResponseController.serverError(res, 'Failed to delete file');
+  }
+};
+
+/**
  * Generate a presigned URL for a specific file
  */
 export const getFilePresignedUrl = async (

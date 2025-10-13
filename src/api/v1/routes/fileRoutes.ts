@@ -5,6 +5,8 @@ import {
   getUserFileStats,
   getFilePresignedUrl,
   getFileDetails,
+  updateFileMetadata,
+  deleteFile,
   uploadFiles,
 } from '../controllers/fileController';
 import { authenticateToken } from '../middlewares/authMiddleware';
@@ -34,7 +36,7 @@ const upload = multer({
 });
 
 /**
- * @swagger
+ * @swaggerx
  * components:
  *   schemas:
  *     FileItem:
@@ -261,7 +263,8 @@ const upload = multer({
  *   get:
  *     summary: Get user files
  *     description: Retrieve all files belonging to the authenticated user from AWS S3
- *     tags: [Files]
+ *     tags:
+ *       - Files
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -269,8 +272,10 @@ const upload = multer({
  *         name: includePresignedUrls
  *         schema:
  *           type: string
- *           enum: [true, false]
- *           default: false
+ *           enum:
+ *             - "true"
+ *             - "false"
+ *           default: "false"
  *         description: Include presigned URLs for temporary file access
  *       - in: query
  *         name: presignedUrlExpiration
@@ -294,15 +299,20 @@ const upload = multer({
  *         name: sortBy
  *         schema:
  *           type: string
- *           enum: [uploadedAt, fileName, fileSize]
+ *           enum:
+ *             - "uploadedAt"
+ *             - "fileName"
+ *             - "fileSize"
  *           default: uploadedAt
  *         description: Field to sort by
  *       - in: query
  *         name: sortOrder
  *         schema:
  *           type: string
- *           enum: [asc, desc]
- *           default: desc
+ *           enum:
+ *             - "asc"
+ *             - "desc"
+ *           default: "desc"
  *         description: Sort order
  *       - in: query
  *         name: mimeTypeFilter
@@ -361,7 +371,8 @@ router.get('/', authenticateToken, getUserFiles);
  *   get:
  *     summary: Get user file statistics
  *     description: Retrieve file statistics for the authenticated user
- *     tags: [Files]
+ *     tags:
+ *       - Files
  *     security:
  *       - bearerAuth: []
  *     responses:
@@ -393,7 +404,8 @@ router.get('/stats', authenticateToken, getUserFileStats);
  *   get:
  *     summary: Generate presigned URL for file access
  *     description: Generate a temporary presigned URL for direct file access
- *     tags: [Files]
+ *     tags:
+ *       - Files
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -524,7 +536,6 @@ router.get('/:fileId/presigned-url', authenticateToken, getFilePresignedUrl);
  *             example:
  *               success: false
  *               message: "User authentication required"
- *               error: "UNAUTHORIZED"
  *       404:
  *         description: File not found or access denied
  *         content:
@@ -534,32 +545,161 @@ router.get('/:fileId/presigned-url', authenticateToken, getFilePresignedUrl);
  *             example:
  *               success: false
  *               message: "File not found or access denied"
- *               error: "NOT_FOUND"
  *       500:
  *         description: Internal server error - database or storage issues
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- *             examples:
- *               db_error:
- *                 summary: Database error
- *                 value:
- *                   success: false
- *                   message: "Failed to retrieve file details"
- *                   error: "INTERNAL_SERVER_ERROR"
- *               storage_error:
- *                 summary: Storage service error
- *                 value:
- *                   success: false
- *                   message: "File storage service error"
- *                   error: "INTERNAL_SERVER_ERROR"
+ *             example:
+ *               success: false
+ *               message: "Internal server error"
  */
-// Get detailed information about a specific file
 router.get('/:id', authenticateToken, getFileDetails);
+router.put('/:id', authenticateToken, updateFileMetadata);
+router.delete('/:id', authenticateToken, deleteFile);
 
 /**
  * @swagger
+ * /api/v1/files/{id}:
+ *   put:
+ *     summary: Update file metadata
+ *     description: Update tags and metadata of a file owned by the authenticated user.
+ *     tags:
+ *       - Files
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: File ID (MongoDB ObjectId)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               tags:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Tags to associate with the file
+ *               metadata:
+ *                 type: object
+ *                 additionalProperties: true
+ *                 description: Arbitrary key-value metadata for the file
+ *     responses:
+ *       200:
+ *         description: File metadata updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "File metadata updated successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     file:
+ *                       $ref: '#/components/schemas/FileItem'
+ *       400:
+ *         description: Invalid ID or request body
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "Invalid file ID or request body"
+ *       401:
+ *         description: Unauthorized - authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "User authentication required"
+ *       404:
+ *         description: File not found or access denied
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "File not found or access denied"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "Internal server error"
+ *   delete:
+ *     summary: Delete file permanently
+ *     description: Permanently delete the file from S3 and remove its database record.
+ *     tags:
+ *       - Files
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: File ID (MongoDB ObjectId)
+ *     responses:
+ *       204:
+ *         description: File deleted successfully (No Content)
+ *       400:
+ *         description: Invalid file ID
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "Invalid file ID"
+ *       401:
+ *         description: Unauthorized - authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "User authentication required"
+ *       404:
+ *         description: File not found or access denied
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "File not found or access denied"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "Internal server error"
  * /api/v1/files/upload:
  *   post:
  *     summary: Upload single or multiple files to S3
@@ -656,13 +796,11 @@ router.get('/:id', authenticateToken, getFileDetails);
  *                 value:
  *                   success: false
  *                   message: "No files provided for upload"
- *                   error: "BAD_REQUEST"
  *               validation_failed:
  *                 summary: File validation failed
  *                 value:
  *                   success: false
  *                   message: "File validation failed"
- *                   error: "BAD_REQUEST"
  *                   data:
  *                     errors:
  *                       - "File 'large_file.zip' exceeds maximum size limit of 50MB"
@@ -674,7 +812,6 @@ router.get('/:id', authenticateToken, getFileDetails);
  *                 value:
  *                   success: false
  *                   message: "File size or quota limit exceeded"
- *                   error: "BAD_REQUEST"
  *                   data:
  *                     error: "File size exceeds the maximum allowed limit"
  *       401:
@@ -686,7 +823,6 @@ router.get('/:id', authenticateToken, getFileDetails);
  *             example:
  *               success: false
  *               message: "User authentication required"
- *               error: "UNAUTHORIZED"
  *       413:
  *         description: Payload too large - file size exceeds server limits
  *         content:
@@ -696,7 +832,6 @@ router.get('/:id', authenticateToken, getFileDetails);
  *             example:
  *               success: false
  *               message: "File size exceeds server limit"
- *               error: "PAYLOAD_TOO_LARGE"
  *       500:
  *         description: Internal server error - S3 or database issues
  *         content:
@@ -709,13 +844,11 @@ router.get('/:id', authenticateToken, getFileDetails);
  *                 value:
  *                   success: false
  *                   message: "Storage service configuration error. Please contact support."
- *                   error: "INTERNAL_SERVER_ERROR"
  *               s3_access_error:
  *                 summary: S3 access error
  *                 value:
  *                   success: false
  *                   message: "Storage service access error. Please contact support."
- *                   error: "INTERNAL_SERVER_ERROR"
  *               network_error:
  *                 summary: Network error
  *                 value:
