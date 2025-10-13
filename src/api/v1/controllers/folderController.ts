@@ -2,14 +2,16 @@ import { Response } from 'express';
 import { ResponseController } from '../../../utils/responseController';
 import { AuthenticatedRequest } from '../../v1/middlewares/authMiddleware';
 import { FolderService } from '../../../services/folderService';
-import { createUserFolderInS3 } from '../../../services/s3FolderService';
+import { createNestedUserFolderInS3 } from '../../../services/s3FolderService';
 
 const folderService = new FolderService();
 
 export const listFolders = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const result = await folderService.listUserFolders(userId);
+    const parentIdParam = (req.query?.parentId as string | undefined) || undefined;
+    const parentId = typeof parentIdParam === 'string' && parentIdParam.trim() ? parentIdParam.trim() : undefined;
+    const result = await folderService.listUserFolders(userId, parentId);
     return ResponseController.ok(res, 'Folders retrieved successfully', result);
   } catch (error: any) {
     return ResponseController.serverError(
@@ -26,18 +28,30 @@ export const createFolder = async (
 ) => {
   try {
     const userId = req.user!.userId;
-    const { name } = req.body || {};
+    const { name, parentId: parentIdRaw } = req.body || {};
 
     if (!name || typeof name !== 'string' || !name.trim()) {
       return ResponseController.badRequest(res, 'Folder name is required');
     }
+    const parentId = typeof parentIdRaw === 'string' && parentIdRaw.trim() ? parentIdRaw.trim() : undefined;
+
+    if (parentId) {
+      const parent = await folderService.getFolderById(userId, parentId);
+      if (!parent) {
+        return ResponseController.notFound(res, 'Parent folder not found');
+      }
+    }
 
     try {
+      // Build nested segments from ancestors and the new folder name
+      const ancestorSegments = await folderService.getFolderPathSegments(userId, parentId);
+      const segments = [...ancestorSegments, name.trim()];
+
       // First, ensure S3 prefix exists for the folder
-      await createUserFolderInS3(userId, name.trim());
+      await createNestedUserFolderInS3(userId, segments);
 
       // Then persist folder in database
-      const folder = await folderService.createFolder(userId, name.trim());
+      const folder = await folderService.createFolder(userId, name.trim(), parentId);
       return ResponseController.created(res, 'Folder created successfully', {
         id: folder._id.toString(),
         name: folder.name,

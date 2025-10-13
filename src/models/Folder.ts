@@ -39,10 +39,14 @@ const folderSchema = new Schema<IFolder>(
   }
 );
 
-// Ensure folder name uniqueness per user (optional parent-based uniqueness could be added later)
-folderSchema.index({ userId: 1, name: 1, isDeleted: 1 }, { unique: true, partialFilterExpression: { isDeleted: false } });
+// Ensure folder name uniqueness per user within the same parent (supports nested folders)
+folderSchema.index(
+  { userId: 1, parentId: 1, name: 1, isDeleted: 1 },
+  { unique: true, partialFilterExpression: { isDeleted: false } }
+);
 
 // Additional indexes for common queries
 folderSchema.index({ userId: 1, createdAt: -1 });
+folderSchema.index({ userId: 1, parentId: 1 });
 
 export default mongoose.model<IFolder>('Folder', folderSchema);

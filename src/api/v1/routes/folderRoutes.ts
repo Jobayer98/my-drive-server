@@ -53,6 +53,10 @@ const router = Router();
  *           type: string
  *           minLength: 1
  *           example: "My New Folder"
+  *         parentId:
+  *           type: string
+  *           description: Optional parent folder ID to create a nested folder under
+  *           example: "652f1f77bcf86cd799439012"
  *     CreateFolderResponse:
  *       type: object
  *       properties:
@@ -93,6 +97,12 @@ router.get('/', authenticateToken, listFolders);
  *       - Folders
  *     security:
  *       - bearerAuth: []
+  *     parameters:
+  *       - in: query
+  *         name: parentId
+  *         schema:
+  *           type: string
+  *         description: Optional parent folder ID. If provided, lists only direct child folders.
  *     responses:
  *       200:
  *         description: Folders retrieved successfully
@@ -149,7 +159,8 @@ router.post('/', authenticateToken, createFolder);
  *           schema:
  *             $ref: '#/components/schemas/CreateFolderRequest'
  *           example:
- *             name: "My New Folder"
+  *             name: "My New Folder"
+  *             parentId: "652f1f77bcf86cd799439012"
  *     responses:
  *       201:
  *         description: Folder created successfully

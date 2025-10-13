@@ -44,6 +44,13 @@ function userFolderPrefix(userId: string, folderName?: string): string {
   return `${base}${sanitizeSegment(folderName)}/`;
 }
 
+function buildUserFolderPrefix(userId: string, segments: string[] = []): string {
+  const base = `folders/${sanitizeSegment(userId)}/`;
+  if (!segments.length) return base;
+  const path = segments.map(sanitizeSegment).filter(Boolean).join('/') + '/';
+  return base + path;
+}
+
 /**
  * Create a logical folder in S3 by writing a zero-byte object with a trailing slash.
  *
@@ -85,6 +92,41 @@ export async function createUserFolderInS3(
     }
     if (code === 'InvalidBucketName') {
       throw new Error('Invalid S3 bucket name');
+    }
+    throw new Error('Failed to create folder in S3');
+  }
+}
+
+export async function createNestedUserFolderInS3(
+  userId: string,
+  segments: string[]
+): Promise<{ key: string }> {
+  const s3 = buildClient();
+  const key = buildUserFolderPrefix(userId, segments);
+
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: BUCKET_NAME }));
+
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: key,
+        Body: '',
+        ContentType: 'application/x-directory',
+      })
+    );
+
+    logger.info(`Created nested S3 folder prefix: ${key}`);
+    return { key };
+  } catch (error: any) {
+    const code = error?.$metadata?.httpStatusCode || error?.name;
+    logger.error('Failed to create nested S3 folder', { key, bucket: BUCKET_NAME, code, error: error?.message || error });
+
+    if (code === 403) {
+      throw new Error('Access denied to S3 bucket');
+    }
+    if (code === 404) {
+      throw new Error('S3 bucket not found');
     }
     throw new Error('Failed to create folder in S3');
   }
@@ -135,6 +177,56 @@ export async function listUserFoldersInS3(
   } catch (error: any) {
     const code = error?.$metadata?.httpStatusCode || error?.name;
     logger.error('Failed to list user folders in S3', { Prefix, bucket: BUCKET_NAME, code, error: error?.message || error });
+
+    if (code === 403) {
+      throw new Error('Access denied to S3 bucket');
+    }
+    if (code === 404) {
+      throw new Error('S3 bucket not found');
+    }
+    throw new Error('Failed to list folders in S3');
+  }
+}
+
+export async function listUserChildFoldersInS3(
+  userId: string,
+  segments: string[] = []
+): Promise<{ folders: { name: string; prefix: string }[]; totalCount: number }> {
+  const s3 = buildClient();
+  const Prefix = buildUserFolderPrefix(userId, segments);
+  const Delimiter = '/';
+
+  try {
+    const folders: { name: string; prefix: string }[] = [];
+    let ContinuationToken: string | undefined = undefined;
+
+    do {
+      const resp: ListObjectsV2CommandOutput = await s3.send(
+        new ListObjectsV2Command({
+          Bucket: BUCKET_NAME,
+          Prefix,
+          Delimiter,
+          ContinuationToken,
+        })
+      );
+
+      const commons = resp.CommonPrefixes || [];
+      for (const cp of commons) {
+        const prefix = cp.Prefix!;
+        const rel = prefix.replace(Prefix, '').split('/').filter(Boolean);
+        const name = rel[0] || '';
+        if (name) {
+          folders.push({ name, prefix });
+        }
+      }
+
+      ContinuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined;
+    } while (ContinuationToken);
+
+    return { folders, totalCount: folders.length };
+  } catch (error: any) {
+    const code = error?.$metadata?.httpStatusCode || error?.name;
+    logger.error('Failed to list user child folders in S3', { Prefix, bucket: BUCKET_NAME, code, error: error?.message || error });
 
     if (code === 403) {
       throw new Error('Access denied to S3 bucket');
