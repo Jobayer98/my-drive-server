@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { ResponseController } from '../../../utils/responseController';
 import { AuthenticatedRequest } from '../../v1/middlewares/authMiddleware';
 import { FolderService } from '../../../services/folderService';
+import { createUserFolderInS3 } from '../../../services/s3FolderService';
 
 const folderService = new FolderService();
 
@@ -32,6 +33,10 @@ export const createFolder = async (
     }
 
     try {
+      // First, ensure S3 prefix exists for the folder
+      await createUserFolderInS3(userId, name.trim());
+
+      // Then persist folder in database
       const folder = await folderService.createFolder(userId, name.trim());
       return ResponseController.created(res, 'Folder created successfully', {
         id: folder._id.toString(),
@@ -45,6 +50,9 @@ export const createFolder = async (
           res,
           'Folder with the same name already exists'
         );
+      }
+      if (error?.message === 'Access denied to S3 bucket' || error?.message === 'S3 bucket not found' || error?.message === 'Failed to create folder in S3') {
+        return ResponseController.serverError(res, 'Failed to create folder in storage', error?.message);
       }
       throw error;
     }
