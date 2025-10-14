@@ -4,6 +4,8 @@ import {
   ListObjectsV2Command,
   ListObjectsV2CommandOutput,
   HeadBucketCommand,
+  CopyObjectCommand,
+  DeleteObjectsCommand,
 } from '@aws-sdk/client-s3';
 import logger from '../utils/logger';
 
@@ -49,6 +51,138 @@ function buildUserFolderPrefix(userId: string, segments: string[] = []): string 
   if (!segments.length) return base;
   const path = segments.map(sanitizeSegment).filter(Boolean).join('/') + '/';
   return base + path;
+}
+
+async function listAllKeysUnderPrefix(prefix: string): Promise<string[]> {
+  const s3 = buildClient();
+  const keys: string[] = [];
+  let ContinuationToken: string | undefined = undefined;
+
+  do {
+    const resp: ListObjectsV2CommandOutput = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET_NAME,
+        Prefix: prefix,
+        ContinuationToken,
+      })
+    );
+    for (const obj of resp.Contents || []) {
+      if (obj.Key) keys.push(obj.Key);
+    }
+    ContinuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined;
+  } while (ContinuationToken);
+
+  return keys;
+}
+
+export async function renameNestedUserFolderInS3(
+  userId: string,
+  oldSegments: string[],
+  newSegments: string[]
+): Promise<{ movedCount: number }> {
+  const s3 = buildClient();
+  const oldPrefix = buildUserFolderPrefix(userId, oldSegments);
+  const newPrefix = buildUserFolderPrefix(userId, newSegments);
+
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: BUCKET_NAME }));
+
+    const keys = await listAllKeysUnderPrefix(oldPrefix);
+    const copied: string[] = [];
+
+    for (const key of keys) {
+      const newKey = key.replace(oldPrefix, newPrefix);
+      await s3.send(
+        new CopyObjectCommand({
+          Bucket: BUCKET_NAME,
+          CopySource: `${BUCKET_NAME}/${encodeURIComponent(key)}`,
+          Key: newKey,
+        })
+      );
+      copied.push(newKey);
+    }
+
+    if (keys.length) {
+      // Delete originals in batches of 1000
+      const batchSize = 1000;
+      for (let i = 0; i < keys.length; i += batchSize) {
+        const batch = keys.slice(i, i + batchSize);
+        await s3.send(
+          new DeleteObjectsCommand({
+            Bucket: BUCKET_NAME,
+            Delete: { Objects: batch.map((Key) => ({ Key })) },
+          })
+        );
+      }
+    }
+
+    // Ensure new folder marker exists
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: newPrefix,
+        Body: '',
+        ContentType: 'application/x-directory',
+      })
+    );
+
+    logger.info(`Renamed S3 folder subtree: ${oldPrefix} -> ${newPrefix}`);
+    return { movedCount: keys.length };
+  } catch (error: any) {
+    logger.error('Failed to rename S3 folder subtree', {
+      bucket: BUCKET_NAME,
+      oldPrefix,
+      newPrefix,
+      error: error?.message || error,
+    });
+    throw new Error('Failed to rename folder in S3');
+  }
+}
+
+export async function deleteUserFolderTreeInS3(
+  userId: string,
+  segments: string[]
+): Promise<{ deletedCount: number }> {
+  const s3 = buildClient();
+  const prefix = buildUserFolderPrefix(userId, segments);
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: BUCKET_NAME }));
+    const keys = await listAllKeysUnderPrefix(prefix);
+    if (keys.length) {
+      const batchSize = 1000;
+      for (let i = 0; i < keys.length; i += batchSize) {
+        const batch = keys.slice(i, i + batchSize);
+        await s3.send(
+          new DeleteObjectsCommand({
+            Bucket: BUCKET_NAME,
+            Delete: { Objects: batch.map((Key) => ({ Key })) },
+          })
+        );
+      }
+    }
+    // Remove the folder marker itself
+    await s3.send(
+      new DeleteObjectsCommand({
+        Bucket: BUCKET_NAME,
+        Delete: { Objects: [{ Key: prefix }] },
+      })
+    );
+    logger.info(`Deleted S3 folder subtree: ${prefix}`);
+    return { deletedCount: keys.length + 1 };
+  } catch (error: any) {
+    logger.error('Failed to delete S3 folder subtree', {
+      bucket: BUCKET_NAME,
+      prefix,
+      error: error?.message || error,
+    });
+    if (error?.$metadata?.httpStatusCode === 403) {
+      throw new Error('Access denied to S3 bucket');
+    }
+    if (error?.$metadata?.httpStatusCode === 404) {
+      throw new Error('S3 bucket not found');
+    }
+    throw new Error('Failed to delete folder in S3');
+  }
 }
 
 /**

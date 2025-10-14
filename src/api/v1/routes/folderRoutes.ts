@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middlewares/authMiddleware';
-import { listFolders, createFolder } from '../controllers/folderController';
+import { listFolders, createFolder, updateFolder, deleteFolder } from '../controllers/folderController';
 
 const router = Router();
 
@@ -215,3 +215,63 @@ router.post('/', authenticateToken, createFolder);
  */
 
 export default router;
+// PUT /api/v1/folders/:id - rename/update a folder
+router.put('/:id', authenticateToken, updateFolder);
+
+// DELETE /api/v1/folders/:id - delete a folder (and its subtree)
+router.delete('/:id', authenticateToken, deleteFolder);
+
+/**
+ * @swagger
+ * /api/v1/folders/{id}:
+ *   put:
+ *     summary: Rename/update a folder
+ *     tags:
+ *       - Folders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: "Renamed Folder"
+ *     responses:
+ *       200:
+ *         description: Folder updated successfully
+ *       404:
+ *         description: Folder not found
+ *       409:
+ *         description: Conflict - folder with the same name already exists
+ *       500:
+ *         description: Server error
+ *   delete:
+ *     summary: Delete a folder (and its subtree)
+ *     tags:
+ *       - Folders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Folder deleted successfully
+ *       404:
+ *         description: Folder not found
+ *       500:
+ *         description: Server error
+ */
