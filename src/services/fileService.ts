@@ -5,6 +5,7 @@ import {
   PutObjectCommand,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
+import { Readable } from 'stream';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import File from '../models/File';
 import logger from '../utils/logger';
@@ -761,6 +762,92 @@ export class FileService {
         fileId,
       });
       throw new Error('Failed to permanently delete file');
+    }
+  }
+
+  /**
+   * Retrieve a file stream from S3 for a user with access verification.
+   * Returns the readable stream along with useful metadata for setting headers.
+   */
+  async getFileStreamForUser(
+    userId: string,
+    fileId: string
+  ): Promise<{
+    stream: Readable;
+    contentType: string;
+    contentLength?: number;
+    fileName: string;
+    s3Key: string;
+    lastModified?: Date;
+    etag?: string;
+  }> {
+    try {
+      const hasAccess = await this.canUserAccessFile(userId, fileId);
+      if (!hasAccess) {
+        throw new Error('ACCESS_DENIED');
+      }
+
+      const fileRecord = await File.findOne({ _id: fileId, isDeleted: false })
+        .select(['s3Key', 's3Bucket', 'mimeType', 'originalName', 'fileName'])
+        .lean();
+
+      if (!fileRecord) {
+        throw new Error('NOT_FOUND');
+      }
+
+      const command = new GetObjectCommand({
+        Bucket: fileRecord.s3Bucket,
+        Key: fileRecord.s3Key,
+      });
+
+      const response = await this.s3Client.send(command);
+
+      if (!response.Body) {
+        throw new Error('NOT_FOUND');
+      }
+
+      const stream = response.Body as unknown as Readable;
+      const contentType =
+        response.ContentType || fileRecord.mimeType || 'application/octet-stream';
+
+      const result: {
+        stream: Readable;
+        contentType: string;
+        contentLength?: number;
+        fileName: string;
+        s3Key: string;
+        lastModified?: Date;
+        etag?: string;
+      } = {
+        stream,
+        contentType,
+        fileName: fileRecord.originalName || fileRecord.fileName,
+        s3Key: fileRecord.s3Key,
+      };
+
+      if (response.ContentLength !== undefined) {
+        result.contentLength = response.ContentLength;
+      }
+      if (response.LastModified !== undefined) {
+        result.lastModified = response.LastModified;
+      }
+      if (response.ETag !== undefined) {
+        result.etag = response.ETag;
+      }
+
+      return result;
+    } catch (error: any) {
+      if (error && typeof error.message === 'string') {
+        if (error.message === 'ACCESS_DENIED' || error.message === 'NOT_FOUND') {
+          throw error;
+        }
+      }
+      logger.error('Error retrieving file stream from S3', {
+        error: error instanceof Error ? error.message : error,
+        userId,
+        fileId,
+      });
+      throw new Error('S3_STREAM_ERROR');
     }
   }
 }

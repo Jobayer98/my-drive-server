@@ -524,6 +524,85 @@ export const getFilePresignedUrl = async (
 };
 
 /**
+ * Stream a file download from S3 for the authenticated user
+ */
+export const downloadFile = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const userId = req.user?.userId;
+    const { id: fileId } = req.params;
+
+    if (!userId) {
+      return ResponseController.unauthorized(res, 'User authentication required');
+    }
+
+    const mongoose = require('mongoose');
+    if (!fileId || typeof fileId !== 'string' || !mongoose.Types.ObjectId.isValid(fileId)) {
+      return ResponseController.badRequest(res, 'Valid file ID is required');
+    }
+
+    logger.info('Starting file download', { userId, fileId });
+
+    const { stream, contentType, contentLength, fileName, etag, lastModified } =
+      await fileService.getFileStreamForUser(userId, fileId);
+
+    // Set headers
+    res.setHeader('Content-Type', contentType);
+    if (contentLength !== undefined) {
+      res.setHeader('Content-Length', contentLength.toString());
+    }
+    // Ensure safe filename; encode to handle special chars
+    const encodedName = encodeURIComponent(fileName);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodedName}"`);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    if (etag) res.setHeader('ETag', etag);
+    if (lastModified) res.setHeader('Last-Modified', new Date(lastModified).toUTCString());
+
+    // Stream to response
+    (stream as any).on('error', (err: any) => {
+      logger.error('Error streaming file to response', {
+        error: err instanceof Error ? err.message : err,
+        userId,
+        fileId,
+      });
+      if (!res.headersSent) {
+        ResponseController.serverError(res, 'Error streaming file');
+      } else {
+        res.destroy(err);
+      }
+    });
+
+    (stream as any).pipe(res);
+    return; // Explicit return to satisfy noImplicitReturns
+  } catch (error) {
+    logger.error('Error handling file download', {
+      error: error instanceof Error ? error.message : error,
+      userId: req.user?.userId,
+      fileId: req.params.id,
+    });
+
+    if (error instanceof Error) {
+      if (error.message === 'ACCESS_DENIED') {
+        return ResponseController.notFound(res, 'File not found or access denied');
+      }
+      if (error.message === 'NOT_FOUND') {
+        return ResponseController.notFound(res, 'File not found');
+      }
+      if (error.message.includes('Invalid') || error.message.includes('ID')) {
+        return ResponseController.badRequest(res, 'Invalid file identifier');
+      }
+      if (error.message.includes('S3') || error.message.includes('AWS')) {
+        return ResponseController.serverError(res, 'Storage service is temporarily unavailable');
+      }
+    }
+
+    return ResponseController.serverError(res, 'Failed to download file');
+  }
+};
+
+/**
  * Upload single or multiple files to S3
  */
 export const uploadFiles = async (req: AuthenticatedRequest, res: Response) => {

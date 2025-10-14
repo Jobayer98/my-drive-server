@@ -5,6 +5,7 @@ import {
   getUserFileStats,
   getFilePresignedUrl,
   getFileDetails,
+  downloadFile,
   updateFileMetadata,
   deleteFile,
   uploadFiles,
@@ -446,6 +447,58 @@ router.get('/stats', authenticateToken, getUserFileStats);
  *         description: Server error
  */
 router.get('/:fileId/presigned-url', authenticateToken, getFilePresignedUrl);
+
+/**
+ * @swagger
+ * /api/v1/files/{id}/download:
+ *   get:
+ *     summary: Download a file
+ *     description: Securely stream a file from AWS S3 if the authenticated user has access.
+ *     tags:
+ *       - Files
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The file ID to download
+ *     responses:
+ *       200:
+ *         description: File stream
+ *         content:
+ *           application/octet-stream:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       400:
+ *         description: Invalid file ID
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: File not found or access denied
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get('/:id/download', authenticateToken, downloadFile);
 
 /**
  * @swagger
