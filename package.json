@@ -7,6 +7,7 @@
     "build": "tsc",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "start": "node dist/server.js",
+    "verify:transfer": "node scripts/verify-transfer.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint . --ext .ts"

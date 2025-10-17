@@ -163,3 +163,85 @@ export const deleteFolder = async (req: AuthenticatedRequest, res: Response) => 
     return ResponseController.serverError(res, 'Failed to delete folder', error?.message || error);
   }
 };
+
+export const moveFolder = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const folderId = req.params.id;
+    const destinationParentIdRaw = (req.body?.destinationParentId as string | null | undefined);
+
+    const mongoose = require('mongoose');
+    if (!folderId || typeof folderId !== 'string' || !mongoose.Types.ObjectId.isValid(folderId)) {
+      return ResponseController.badRequest(res, 'Valid folder ID is required');
+    }
+
+    let destinationParentId: string | null | undefined = undefined;
+    if (typeof destinationParentIdRaw === 'string') {
+      const trimmed = destinationParentIdRaw.trim();
+      if (trimmed.length > 0) {
+        if (!mongoose.Types.ObjectId.isValid(trimmed)) {
+          return ResponseController.badRequest(res, 'Valid destination parent ID is required');
+        }
+        destinationParentId = trimmed;
+      } else {
+        destinationParentId = null; // move to root
+      }
+    }
+
+    const current = await folderService.getFolderById(userId, folderId);
+    if (!current) {
+      return ResponseController.notFound(res, 'Folder not found');
+    }
+
+    // Build S3 old and new segments
+    const oldAncestorSegments = await folderService.getFolderPathSegments(
+      userId,
+      current.parentId ? current.parentId.toString() : null
+    );
+    const oldSegments = [...oldAncestorSegments, current.name];
+
+    const newAncestorSegments = await folderService.getFolderPathSegments(
+      userId,
+      destinationParentId ? destinationParentId : null
+    );
+    const newSegments = [...newAncestorSegments, current.name];
+
+    try {
+      // S3 rename first; rollback on DB failure
+      await renameNestedUserFolderInS3(userId, oldSegments, newSegments);
+      const updated = await folderService.moveFolder(userId, folderId, destinationParentId ?? null);
+      if (!updated) {
+        // rollback S3
+        try { await renameNestedUserFolderInS3(userId, newSegments, oldSegments); } catch {}
+        return ResponseController.serverError(res, 'Failed to move folder', 'Move failed');
+      }
+      return ResponseController.ok(res, 'Folder moved successfully', {
+        id: updated._id.toString(),
+        name: updated.name,
+        parentId: updated.parentId ? updated.parentId.toString() : null,
+        createdAt: updated.createdAt,
+        updatedAt: updated.updatedAt,
+      });
+    } catch (error: any) {
+      if (error?.message === 'FOLDER_EXISTS') {
+        return ResponseController.conflict(res, 'Folder with the same name already exists at destination');
+      }
+      if (error?.message === 'DESTINATION_NOT_FOUND') {
+        return ResponseController.notFound(res, 'Destination folder not found');
+      }
+      if (error?.message === 'INVALID_DESTINATION') {
+        return ResponseController.badRequest(res, 'Invalid destination: cannot move into its own subtree');
+      }
+      if (
+        error?.message === 'Access denied to S3 bucket' ||
+        error?.message === 'S3 bucket not found' ||
+        error?.message === 'Failed to rename folder in S3'
+      ) {
+        return ResponseController.serverError(res, 'Failed to move folder in storage', error?.message);
+      }
+      throw error;
+    }
+  } catch (error: any) {
+    return ResponseController.serverError(res, 'Failed to move folder', error?.message || error);
+  }
+};

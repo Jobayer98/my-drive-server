@@ -3,6 +3,7 @@ import mongoose, { Document, Schema, Types } from 'mongoose';
 export interface IFile extends Document {
   _id: Types.ObjectId;
   userId: Types.ObjectId;
+  folderId?: Types.ObjectId | null;
   fileName: string;
   originalName: string;
   fileSize: number;
@@ -27,6 +28,12 @@ const fileSchema = new Schema<IFile>(
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: true,
+      index: true,
+    },
+    folderId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Folder',
+      default: null,
       index: true,
     },
     fileName: {
@@ -88,6 +95,7 @@ const fileSchema = new Schema<IFile>(
 
 // Indexes for efficient queries
 fileSchema.index({ userId: 1, isDeleted: 1 }); // Main query for user files
+fileSchema.index({ userId: 1, folderId: 1, isDeleted: 1 }); // Query files within a folder
 fileSchema.index({ userId: 1, uploadedAt: -1 }); // Sort by upload date
 fileSchema.index({ userId: 1, fileName: 1 }); // Search by filename
 fileSchema.index({ userId: 1, mimeType: 1 }); // Filter by file type

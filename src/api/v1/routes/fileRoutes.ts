@@ -9,6 +9,7 @@ import {
   updateFileMetadata,
   deleteFile,
   uploadFiles,
+  moveFile,
 } from '../controllers/fileController';
 import { authenticateToken } from '../middlewares/authMiddleware';
 
@@ -611,6 +612,80 @@ router.get('/:id/download', authenticateToken, downloadFile);
 router.get('/:id', authenticateToken, getFileDetails);
 router.put('/:id', authenticateToken, updateFileMetadata);
 router.delete('/:id', authenticateToken, deleteFile);
+
+/**
+ * @swagger
+ * /api/v1/files/{id}/move:
+ *   put:
+ *     summary: Move a file to a destination folder
+ *     description: Re-associate a file with a destination folder (or root) for the authenticated user.
+ *     tags:
+ *       - Files
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: File ID (MongoDB ObjectId)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               destinationFolderId:
+ *                 type: string
+ *                 nullable: true
+ *                 description: Destination folder ID. Provide empty string or null to move to root.
+ *     responses:
+ *       200:
+ *         description: File moved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "File moved successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     file:
+ *                       $ref: '#/components/schemas/FileItem'
+ *       400:
+ *         description: Invalid ID or request body
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: Unauthorized - authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: File or destination folder not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.put('/:id/move', authenticateToken, moveFile);
 
 /**
  * @swagger

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middlewares/authMiddleware';
-import { listFolders, createFolder, updateFolder, deleteFolder } from '../controllers/folderController';
+import { listFolders, createFolder, updateFolder, deleteFolder, moveFolder } from '../controllers/folderController';
 
 const router = Router();
 
@@ -220,6 +220,63 @@ router.put('/:id', authenticateToken, updateFolder);
 
 // DELETE /api/v1/folders/:id - delete a folder (and its subtree)
 router.delete('/:id', authenticateToken, deleteFolder);
+
+/**
+ * @swagger
+ * /api/v1/folders/{id}/move:
+ *   put:
+ *     summary: Move a folder under a new parent
+ *     description: Move (reparent) a folder to a new destination parent or to root. Ensures S3 subtree rename and database consistency with rollback on failure.
+ *     tags:
+ *       - Folders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Folder ID (MongoDB ObjectId)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               destinationParentId:
+ *                 type: string
+ *                 nullable: true
+ *                 description: Destination parent folder ID. Provide empty string or null to move to root.
+ *     responses:
+ *       200:
+ *         description: Folder moved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Folder moved successfully"
+ *                 data:
+ *                   $ref: '#/components/schemas/FolderItem'
+ *       400:
+ *         description: Invalid ID or destination
+ *       401:
+ *         description: Unauthorized - authentication required
+ *       404:
+ *         description: Folder or destination parent not found
+ *       409:
+ *         description: Conflict - a folder with the same name exists at destination
+ *       500:
+ *         description: Server error or storage operation failed
+ */
+router.put('/:id/move', authenticateToken, moveFolder);
 
 /**
  * @swagger

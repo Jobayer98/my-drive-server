@@ -8,6 +8,7 @@ import {
 import { Readable } from 'stream';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import File from '../models/File';
+import Folder from '../models/Folder';
 import logger from '../utils/logger';
 import { generateUniqueFilename } from '../utils/fileValidation';
 
@@ -59,6 +60,92 @@ export class FileService {
       },
     });
     this.bucketName = process.env.AWS_S3_BUCKET_NAME!;
+  }
+
+  /**
+   * Move a file to a destination folder (or to root when destinationFolderId is null).
+   * This updates only the database association; the S3 key remains unchanged.
+   * Preserves file metadata and access controls.
+   */
+  async moveFile(
+    userId: string,
+    fileId: string,
+    destinationFolderId?: string | null
+  ): Promise<{
+    id: string;
+    fileName: string;
+    originalName: string;
+    fileSize: number;
+    mimeType: string;
+    folderId?: string | null;
+    s3Key: string;
+    s3Bucket: string;
+    uploadedAt: Date;
+    lastModified: Date;
+    tags?: string[];
+    metadata?: Record<string, any>;
+  } | null> {
+    try {
+      const file = await File.findOne({ _id: fileId, userId, isDeleted: false });
+      if (!file) {
+        return null;
+      }
+
+      let destId: string | null = null;
+      if (destinationFolderId && typeof destinationFolderId === 'string') {
+        const dest = await Folder.findOne({ _id: destinationFolderId, userId, isDeleted: false })
+          .select({ _id: 1 })
+          .lean();
+        if (!dest) {
+          const err: any = new Error('DESTINATION_NOT_FOUND');
+          throw err;
+        }
+        destId = destinationFolderId;
+      }
+
+      // Update association; keep metadata and ACLs untouched
+      const updated = await File.findOneAndUpdate(
+        { _id: fileId, userId, isDeleted: false },
+        { $set: { folderId: destId, lastModified: new Date() } },
+        { new: true }
+      ).lean();
+
+      if (!updated) {
+        return null;
+      }
+
+      logger.info('Moved file to destination folder', {
+        userId,
+        fileId,
+        destinationFolderId: destId,
+      });
+
+      return {
+        id: updated._id.toString(),
+        fileName: updated.fileName,
+        originalName: updated.originalName,
+        fileSize: updated.fileSize,
+        mimeType: updated.mimeType,
+        folderId: updated.folderId ? updated.folderId.toString() : null,
+        s3Key: updated.s3Key,
+        s3Bucket: updated.s3Bucket,
+        uploadedAt: updated.uploadedAt,
+        lastModified: updated.lastModified,
+        tags: updated.tags ?? [],
+        metadata: updated.metadata ?? {},
+      };
+    } catch (error) {
+      logger.error('Error moving file to folder', {
+        error: error instanceof Error ? error.message : error,
+        userId,
+        fileId,
+        destinationFolderId,
+      });
+      if ((error as any)?.message === 'DESTINATION_NOT_FOUND') {
+        throw error;
+      }
+      throw new Error('Failed to move file');
+    }
   }
 
   /**

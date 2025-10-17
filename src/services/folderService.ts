@@ -224,4 +224,79 @@ export class FolderService {
       throw new Error('Failed to delete folder');
     }
   }
+
+  /**
+   * Move (reparent) a folder under a new parent. Prevents cycles and name conflicts.
+   */
+  async moveFolder(
+    userId: string,
+    folderId: string,
+    destinationParentId?: string | null
+  ): Promise<IFolderLean | null> {
+    try {
+      const current = (await Folder.findOne({ _id: folderId, userId, isDeleted: false })
+        .lean<IFolderLean>()
+        .exec()) as unknown as IFolderLean | null;
+      if (!current) return null;
+
+      // Resolve destination parent (nullable root)
+      let destParent: IFolderLean | null = null;
+      if (destinationParentId && destinationParentId.trim()) {
+        destParent = (await Folder.findOne({ _id: destinationParentId, userId, isDeleted: false })
+          .lean<IFolderLean>()
+          .exec()) as unknown as IFolderLean | null;
+        if (!destParent) {
+          const err: any = new Error('DESTINATION_NOT_FOUND');
+          throw err;
+        }
+      }
+
+      // Prevent moving a folder under itself or its descendants (cycle detection)
+      if (destParent) {
+        let checkId: string | null = destParent._id.toString();
+        const safetyLimit = 50;
+        let counter = 0;
+        while (checkId && counter < safetyLimit) {
+          if (checkId === folderId) {
+            const err: any = new Error('INVALID_DESTINATION');
+            throw err;
+          }
+          const parent = (await Folder.findOne({ _id: checkId, userId, isDeleted: false })
+            .lean<IFolderLean>()
+            .exec()) as unknown as IFolderLean | null;
+          checkId = parent?.parentId ? parent.parentId.toString() : null;
+          counter++;
+        }
+      }
+
+      // Name conflict under the new parent
+      const conflict = await Folder.findOne({
+        userId,
+        parentId: destParent ? destParent._id : null,
+        name: current.name,
+        isDeleted: false,
+      })
+        .lean<IFolderLean>()
+        .exec();
+      if (conflict && conflict._id.toString() !== folderId) {
+        const err: any = new Error('FOLDER_EXISTS');
+        throw err;
+      }
+
+      const updated = await Folder.findOneAndUpdate(
+        { _id: folderId, userId, isDeleted: false },
+        { $set: { parentId: destParent ? destParent._id : null } },
+        { new: true }
+      )
+        .lean<IFolderLean>()
+        .exec();
+      return updated as IFolderLean | null;
+    } catch (error: any) {
+      if (error?.message === 'FOLDER_EXISTS' || error?.message === 'DESTINATION_NOT_FOUND' || error?.message === 'INVALID_DESTINATION') {
+        throw error;
+      }
+      logger.error('Error moving folder:', error);
+      throw new Error('Failed to move folder');
+    }
+  }
 }

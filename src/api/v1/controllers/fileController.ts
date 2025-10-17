@@ -768,3 +768,71 @@ export const uploadFiles = async (req: AuthenticatedRequest, res: Response) => {
     );
   }
 };
+
+/**
+ * Move a file to a destination folder (or root) for the authenticated user.
+ * This updates the database association and preserves metadata and ACLs.
+ */
+export const moveFile = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    const { id: fileId } = req.params;
+    const destinationFolderIdRaw = (req.body?.destinationFolderId as string | null | undefined);
+
+    if (!userId) {
+      return ResponseController.unauthorized(res, 'User authentication required');
+    }
+
+    const mongoose = require('mongoose');
+    if (!fileId || typeof fileId !== 'string' || !mongoose.Types.ObjectId.isValid(fileId)) {
+      return ResponseController.badRequest(res, 'Valid file ID is required');
+    }
+
+    let destinationFolderId: string | null | undefined = undefined;
+    if (typeof destinationFolderIdRaw === 'string') {
+      const trimmed = destinationFolderIdRaw.trim();
+      if (trimmed.length > 0) {
+        if (!mongoose.Types.ObjectId.isValid(trimmed)) {
+          return ResponseController.badRequest(res, 'Valid destination folder ID is required');
+        }
+        destinationFolderId = trimmed;
+      } else {
+        destinationFolderId = null; // move to root
+      }
+    }
+
+    // Ownership check: only owners can move files
+    const File = require('../../../models/File').default;
+    const file = await File.findOne({ _id: fileId, userId, isDeleted: false }).select({ _id: 1 }).lean();
+    if (!file) {
+      return ResponseController.notFound(res, 'File not found or access denied');
+    }
+
+    logger.info('Moving file', { userId, fileId, destinationFolderId });
+
+    const updated = await fileService.moveFile(userId, fileId, destinationFolderId ?? null);
+    if (!updated) {
+      return ResponseController.serverError(res, 'Failed to move file');
+    }
+
+    return ResponseController.ok(res, 'File moved successfully', { file: updated });
+  } catch (error: any) {
+    logger.error('Error moving file', {
+      error: error instanceof Error ? error.message : error,
+      userId: req.user?.userId,
+      fileId: req.params.id,
+      destinationFolderId: req.body?.destinationFolderId,
+    });
+
+    if (error instanceof Error) {
+      if (error.message === 'DESTINATION_NOT_FOUND') {
+        return ResponseController.notFound(res, 'Destination folder not found');
+      }
+      if (error.message.includes('Invalid') || error.message.includes('ID')) {
+        return ResponseController.badRequest(res, 'Invalid identifier');
+      }
+    }
+
+    return ResponseController.serverError(res, 'Failed to move file');
+  }
+};
