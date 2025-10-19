@@ -38,7 +38,7 @@ const upload = multer({
 });
 
 /**
- * @swaggerx
+ * @swagger
  * components:
  *   schemas:
  *     FileItem:
@@ -118,7 +118,6 @@ const upload = multer({
  *               type: number
  *               description: Total number of files
  *               example: 150
- *
  *     FileStats:
  *       type: object
  *       properties:
