@@ -240,3 +240,117 @@ export const revokeShare = async (req: AuthenticatedRequest, res: Response) => {
     return ResponseController.serverError(res, 'Failed to revoke share');
   }
 };
+
+export const listShares = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ownerId = req.user?.userId;
+    if (!ownerId) {
+      return ResponseController.unauthorized(res, 'User authentication required');
+    }
+    const shares = await shareService.listShares(ownerId);
+    return ResponseController.ok(res, 'Shares retrieved', { shares });
+  } catch (error: any) {
+    logger.error('Error listing shares', { error: error instanceof Error ? error.message : error, userId: req.user?.userId });
+    return ResponseController.serverError(res, 'Failed to list shares');
+  }
+};
+
+export const updateShare = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ownerId = req.user?.userId;
+    const { id } = req.params;
+    if (!ownerId) {
+      return ResponseController.unauthorized(res, 'User authentication required');
+    }
+    if (!id || typeof id !== 'string') {
+      return ResponseController.badRequest(res, 'Valid share ID is required');
+    }
+
+    const { permissions, expiresAt, allowedEmails, isRevoked } = req.body || {};
+
+    let parsedExpiry: Date | null | undefined = undefined;
+    if (expiresAt !== undefined) {
+      if (expiresAt === null) {
+        parsedExpiry = null;
+      } else {
+        const dt = new Date(expiresAt);
+        if (isNaN(dt.getTime())) {
+          return ResponseController.badRequest(res, 'expiresAt must be a valid date or null');
+        }
+        parsedExpiry = dt;
+      }
+    }
+
+    const patch: { permissions?: any; expiresAt?: Date | null; allowedEmails?: any; isRevoked?: boolean } = {};
+    if (permissions !== undefined) patch.permissions = permissions;
+    if (parsedExpiry !== undefined) patch.expiresAt = parsedExpiry;
+    if (allowedEmails !== undefined) patch.allowedEmails = allowedEmails;
+    if (isRevoked !== undefined) patch.isRevoked = isRevoked;
+
+    const updated = await shareService.updateShare(id, ownerId, patch);
+
+    if (!updated) {
+      return ResponseController.notFound(res, 'Share not found or no changes applied');
+    }
+
+    return ResponseController.ok(res, 'Share updated', updated);
+  } catch (error: any) {
+    logger.error('Error updating share', { error: error instanceof Error ? error.message : error, userId: req.user?.userId, id: req.params.id });
+    if (error instanceof Error && error.message === 'INVALID_EXPIRY') {
+      return ResponseController.badRequest(res, 'Expiration must be a future date');
+    }
+    return ResponseController.serverError(res, 'Failed to update share');
+  }
+};
+
+export const presignUploadForShare = async (req: Request, res: Response) => {
+  try {
+    const { token } = req.params;
+    const { fileName, contentType, expirationSeconds = '900' } = req.body || {};
+
+    if (!token || typeof token !== 'string') {
+      return ResponseController.badRequest(res, 'Valid share token is required');
+    }
+
+    const share = await shareService.getShareByToken(token);
+    if (!share) {
+      return ResponseController.notFound(res, 'Share not found or expired');
+    }
+
+    const hasEdit = Array.isArray(share.permissions) && share.permissions.includes('edit');
+    if (!hasEdit) {
+      return ResponseController.unauthorized(res, 'Upload permission not granted');
+    }
+
+    const expires = Math.min(Math.max(parseInt(expirationSeconds) || 900, 300), 3600);
+
+    let targetKey: string;
+    if (share.type === 'file') {
+      if (!share.item?.s3Key) {
+        return ResponseController.serverError(res, 'Shared file storage key missing');
+      }
+      targetKey = share.item.s3Key;
+    } else {
+      const baseName = typeof fileName === 'string' && fileName.trim().length ? fileName.trim() : 'upload.bin';
+      const { generateUniqueFilename } = await import('../../../utils/fileValidation');
+      const uniqueName = generateUniqueFilename(baseName);
+      targetKey = `uploads/${share.ownerId}/${share._id}/${uniqueName}`;
+    }
+
+    const options: { contentType?: string; enforceSSE?: boolean } = {};
+    if (typeof contentType === 'string') options.contentType = contentType;
+    if (process.env.AWS_SSE) options.enforceSSE = true;
+
+    const presignedUrl = await fileService.generatePresignedPutUrl(targetKey, expires, options);
+
+    return ResponseController.ok(res, 'Presigned upload URL generated', {
+      presignedUrl,
+      s3Key: targetKey,
+      expiresIn: expires,
+      type: share.type,
+    });
+  } catch (error: any) {
+    logger.error('Error generating upload presign for share', { error: error instanceof Error ? error.message : error, token: (req as any)?.params?.token });
+    return ResponseController.serverError(res, 'Failed to generate upload URL');
+  }
+};

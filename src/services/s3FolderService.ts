@@ -423,3 +423,87 @@ export async function listFoldersInBucket(
     throw new Error('Failed to list folders in S3');
   }
 }
+
+export async function listObjectsUnderPrefix(
+  prefix: string,
+  options: {
+    recursive?: boolean;
+    maxKeys?: number;
+    continuationToken?: string;
+  } = {}
+): Promise<{
+  objects: { key: string; size?: number; lastModified?: Date }[];
+  prefixes: string[];
+  nextContinuationToken?: string;
+  isTruncated: boolean;
+  count: number;
+}> {
+  const s3 = buildClient();
+  const {
+    recursive = false,
+    maxKeys = 100,
+    continuationToken,
+  } = options;
+
+  const params: any = {
+    Bucket: BUCKET_NAME,
+    Prefix: prefix,
+    MaxKeys: Math.min(Math.max(maxKeys, 1), 1000),
+  };
+
+  if (!recursive) {
+    params.Delimiter = '/';
+  }
+  if (continuationToken) {
+    params.ContinuationToken = continuationToken;
+  }
+
+  try {
+    const resp: ListObjectsV2CommandOutput = await s3.send(
+      new ListObjectsV2Command(params)
+    );
+
+    const objects: { key: string; size?: number; lastModified?: Date }[] = [];
+    for (const o of resp.Contents || []) {
+      if (!o.Key || o.Key === prefix) continue; // exclude folder marker
+      const item: { key: string; size?: number; lastModified?: Date } = {
+        key: o.Key,
+      };
+      if (typeof o.Size === 'number') {
+        item.size = o.Size;
+      }
+      if (o.LastModified) {
+        item.lastModified = o.LastModified;
+      }
+      objects.push(item);
+    }
+
+    const prefixes = (resp.CommonPrefixes || []).map((cp) => cp.Prefix!).filter(Boolean);
+
+    const base = {
+      objects,
+      prefixes,
+      isTruncated: !!resp.IsTruncated,
+      count: objects.length + prefixes.length,
+    };
+    return resp.IsTruncated && typeof resp.NextContinuationToken === 'string'
+      ? { ...base, nextContinuationToken: resp.NextContinuationToken }
+      : base;
+  } catch (error: any) {
+    const code = error?.$metadata?.httpStatusCode || error?.name;
+    logger.error('Failed to list objects under prefix', {
+      prefix,
+      bucket: BUCKET_NAME,
+      code,
+      error: error?.message || error,
+    });
+
+    if (code === 403) {
+      throw new Error('Access denied to S3 bucket');
+    }
+    if (code === 404) {
+      throw new Error('S3 bucket not found');
+    }
+    throw new Error('Failed to list objects in S3');
+  }
+}

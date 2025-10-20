@@ -134,4 +134,105 @@ export class ShareService {
     logger.info('Share revoked', { id, ownerId });
     return true;
   }
+
+  async listShares(ownerId: string): Promise<Array<{
+    id: string;
+    type: ShareType;
+    itemId: string;
+    token: string;
+    permissions: SharePermission[];
+    expiresAt?: Date | null;
+    allowedEmails?: string[];
+    isRevoked: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }>> {
+    const shares = await Share.find({ ownerId }).sort({ createdAt: -1 }).lean();
+    return shares.map((s) => ({
+      id: s._id.toString(),
+      type: s.type as ShareType,
+      itemId: s.itemId.toString(),
+      token: s.token,
+      permissions: s.permissions as SharePermission[],
+      expiresAt: s.expiresAt ?? null,
+      ...(Array.isArray(s.allowedEmails) && s.allowedEmails.length ? { allowedEmails: s.allowedEmails } : {}),
+      isRevoked: !!s.isRevoked,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    }));
+  }
+
+  async updateShare(
+    id: string,
+    ownerId: string,
+    patch: {
+      permissions?: SharePermission[];
+      expiresAt?: Date | null;
+      allowedEmails?: string[];
+      isRevoked?: boolean;
+    }
+  ): Promise<{
+    id: string;
+    type: ShareType;
+    itemId: string;
+    token: string;
+    permissions: SharePermission[];
+    expiresAt?: Date | null;
+    allowedEmails?: string[];
+    isRevoked: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null> {
+    const update: any = {};
+
+    if (patch.permissions) {
+      update.permissions = this.normalizePermissions(patch.permissions);
+    }
+
+    if (patch.expiresAt !== undefined) {
+      let expires: Date | null = patch.expiresAt ?? null;
+      if (expires) {
+        const now = new Date();
+        if (expires <= now) {
+          throw new Error('INVALID_EXPIRY');
+        }
+      }
+      update.expiresAt = expires;
+    }
+
+    if (patch.allowedEmails !== undefined) {
+      update.allowedEmails = Array.isArray(patch.allowedEmails)
+        ? patch.allowedEmails.filter((e) => typeof e === 'string' && e.trim().length > 0)
+        : [];
+    }
+
+    if (typeof patch.isRevoked === 'boolean') {
+      update.isRevoked = patch.isRevoked;
+    }
+
+    if (Object.keys(update).length === 0) {
+      return null;
+    }
+
+    const updated = await Share.findOneAndUpdate(
+      { _id: id, ownerId },
+      { $set: update },
+      { new: true }
+    ).lean();
+
+    if (!updated) return null;
+
+    return {
+      id: updated._id.toString(),
+      type: updated.type as ShareType,
+      itemId: updated.itemId.toString(),
+      token: updated.token,
+      permissions: updated.permissions as SharePermission[],
+      expiresAt: updated.expiresAt ?? null,
+      ...(Array.isArray(updated.allowedEmails) && updated.allowedEmails.length ? { allowedEmails: updated.allowedEmails } : {}),
+      isRevoked: !!updated.isRevoked,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+    };
+  }
 }

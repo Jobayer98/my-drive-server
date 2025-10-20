@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middlewares/authMiddleware';
-import { createShare, getShareByToken, revokeShare } from '../controllers/shareController';
+import { createShare, getShareByToken, revokeShare, listShares, updateShare, presignUploadForShare } from '../controllers/shareController';
 
 const router = Router();
 
@@ -10,6 +10,22 @@ const router = Router();
  *   name: Sharing
  *   description: Secure sharing of files and folders
  */
+
+/**
+ * @swagger
+ * /api/v1/share:
+ *   get:
+ *     summary: List all shares created by the authenticated user
+ *     tags: [Sharing]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Shares retrieved
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/', authenticateToken, listShares);
 
 /**
  * @swagger
@@ -60,6 +76,54 @@ const router = Router();
  *         description: Item not found or access denied
  */
 router.post('/', authenticateToken, createShare);
+
+/**
+ * @swagger
+ * /api/v1/share/{id}:
+ *   patch:
+ *     summary: Update a share's permissions, expiration, or recipients
+ *     tags: [Sharing]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: Share ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               permissions:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   enum: [view, download, edit]
+ *               expiresAt:
+ *                 type: string
+ *                 format: date-time
+ *               allowedEmails:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               isRevoked:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Share updated
+ *       400:
+ *         description: Invalid input
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Share not found
+ */
+router.patch('/:id', authenticateToken, updateShare);
 
 /**
  * @swagger
@@ -115,6 +179,49 @@ router.post('/', authenticateToken, createShare);
  *         description: Share not found or expired
  */
 router.get('/:token', getShareByToken);
+
+/**
+ * @swagger
+ * /api/v1/share/{token}/presign-upload:
+ *   post:
+ *     summary: Generate a presigned PUT URL for uploading via a share token
+ *     tags: [Sharing]
+ *     parameters:
+ *       - in: path
+ *         name: token
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: Share token
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               fileName:
+ *                 type: string
+ *                 description: Desired file name (folder shares only)
+ *               contentType:
+ *                 type: string
+ *                 description: MIME type for the upload
+ *               expirationSeconds:
+ *                 type: integer
+ *                 minimum: 300
+ *                 maximum: 3600
+ *                 description: URL expiration time in seconds
+ *     responses:
+ *       200:
+ *         description: Presigned upload URL generated
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: Unauthorized or insufficient permissions
+ *       404:
+ *         description: Share not found or expired
+ */
+router.post('/:token/presign-upload', presignUploadForShare);
 
 /**
  * @swagger

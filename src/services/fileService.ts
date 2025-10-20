@@ -254,59 +254,78 @@ export class FileService {
   }
 
   /**
-   * Generate a presigned URL for file access
+   * Generate a presigned URL for file access (GET)
    */
   async generatePresignedUrl(
     s3Key: string,
     expirationSeconds: number = 3600
   ): Promise<string> {
     try {
-      // Validate input parameters
       if (!s3Key || typeof s3Key !== 'string') {
         throw new Error('Invalid S3 key provided');
       }
 
-      // Validate expiration time (5 minutes to 24 hours)
-      const validatedExpiration = Math.min(
-        Math.max(expirationSeconds, 300),
-        86400
-      );
+      const validatedExpiration = Math.min(Math.max(expirationSeconds, 300), 86400);
 
-      if (validatedExpiration !== expirationSeconds) {
-        logger.warn(
-          `Expiration time adjusted from ${expirationSeconds} to ${validatedExpiration} seconds for S3 key: ${s3Key}`
-        );
-      }
-
-      // Create the GetObject command
       const command = new GetObjectCommand({
         Bucket: this.bucketName,
         Key: s3Key,
       });
 
-      // Generate the presigned URL
       const presignedUrl = await getSignedUrl(this.s3Client, command, {
         expiresIn: validatedExpiration,
       });
 
-      logger.debug(
-        `Generated presigned URL for S3 key: ${s3Key}, expires in: ${validatedExpiration}s`
-      );
-
+      logger.debug(`Generated presigned GET URL for S3 key: ${s3Key}, expires in: ${validatedExpiration}s`);
       return presignedUrl;
     } catch (error) {
-      logger.error(`Error generating presigned URL for key ${s3Key}:`, {
+      logger.error(`Error generating presigned GET URL for key ${s3Key}:`, {
         error: error instanceof Error ? error.message : error,
         s3Key,
         expirationSeconds,
       });
+      throw new Error('Failed to generate presigned URL for file access');
+    }
+  }
 
-      // Throw a more specific error message
-      if (error instanceof Error && error.message.includes('Invalid S3 key')) {
-        throw error;
+  // Added: generatePresignedPutUrl (PUT presign for uploads)
+  async generatePresignedPutUrl(
+    s3Key: string,
+    expirationSeconds: number = 3600,
+    options: {
+      contentType?: string;
+      enforceSSE?: boolean;
+    } = {}
+  ): Promise<string> {
+    try {
+      if (!s3Key || typeof s3Key !== 'string') {
+        throw new Error('Invalid S3 key provided');
       }
 
-      throw new Error('Failed to generate presigned URL for file access');
+      const validatedExpiration = Math.min(Math.max(expirationSeconds, 300), 86400);
+
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: s3Key,
+        ...(options.contentType ? { ContentType: options.contentType } : {}),
+        ...(options.enforceSSE && process.env.AWS_SSE
+          ? { ServerSideEncryption: process.env.AWS_SSE as any }
+          : {}),
+      });
+
+      const url = await getSignedUrl(this.s3Client, command, {
+        expiresIn: validatedExpiration,
+      });
+
+      logger.debug(`Generated presigned PUT URL for S3 key: ${s3Key}, expires in: ${validatedExpiration}s`);
+      return url;
+    } catch (error) {
+      logger.error(`Error generating presigned PUT URL for key ${s3Key}:`, {
+        error: error instanceof Error ? error.message : error,
+        s3Key,
+        expirationSeconds,
+      });
+      throw new Error('Failed to generate presigned upload URL');
     }
   }
 

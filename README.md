@@ -44,7 +44,13 @@ src/
 ### Sharing
 - `POST /api/v1/share` - Share file/folder
 - `GET /api/v1/share/:token` - Access shared content
+- `GET /api/v1/share` - List shares for authenticated user
+- `PATCH /api/v1/share/:id` - Update share (permissions, expiry, recipients, revoke)
+- `POST /api/v1/share/:token/presign-upload` - Presign PUT for uploads when share permits `edit`
 - `DELETE /api/v1/share/:id` - Revoke share
+
+### S3
+- `GET /api/v1/s3/list` - List S3 objects and folders under a user-scoped prefix
 
 ### User
 - `GET /api/v1/user/profile` - Get user profile
@@ -159,3 +165,62 @@ curl -X DELETE "http://localhost:3000/api/v1/share/<id>" \
 - `allowedEmails` gate access to specified recipients when provided.
 - Expired shares are rejected; `expiresAt` must be in the future.
 - `edit` is reserved for endpoints that perform write operations.
+
+#### Upload via Share (Edit Permission Required)
+- `POST /api/v1/share/:token/presign-upload`
+- Body:
+  - `fileName` (optional for folders): preferred name; unique filename is generated
+  - `contentType` (optional): MIME type to bind presign
+  - `expirationSeconds` (optional): `300`–`3600` (default `900`)
+- Behavior:
+  - File shares presign to the same `s3Key` (overwrite allowed).
+  - Folder shares presign to a unique key under `uploads/<ownerId>/<shareId>/<uniqueName>`.
+  - When `AWS_SSE` is set, server-side encryption is enforced.
+- Example:
+```
+curl -X POST "http://localhost:3000/api/v1/share/<token>/presign-upload" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fileName":"new-report.pdf",
+    "contentType":"application/pdf",
+    "expirationSeconds":900
+  }'
+```
+- Response:
+```
+{
+  "presignedUrl": "https://s3...",
+  "s3Key": "uploads/<ownerId>/<shareId>/<uniqueName>",
+  "expiresIn": 900,
+  "type": "folder"
+}
+```
+
+#### List Shares
+- `GET /api/v1/share` (Authenticated)
+- Returns all active shares for the user, with optional `allowedEmails` present only when set.
+
+#### Update Share
+- `PATCH /api/v1/share/:id` (Authenticated)
+- Body fields are optional; only provided fields are updated:
+  - `permissions`: array of `view` | `download` | `edit`
+  - `expiresAt`: ISO timestamp in the future or `null` to clear
+  - `allowedEmails`: array of recipient emails
+  - `isRevoked`: boolean
+
+#### S3 Listing
+- `GET /api/v1/s3/list` (Authenticated)
+- Query:
+  - `base`: `files` | `folders` (`files` → `<userId>/`, `folders` → `folders/<userId>/`)
+  - `path` (optional): relative path under base
+  - `recursive` (optional): boolean
+  - `maxKeys` (optional): 1–1000 (default 100)
+  - `continuationToken` (optional): for pagination
+- Response includes `objects`, `prefixes`, `isTruncated`, and `nextContinuationToken` only when present.
+
+#### Security Best Practices
+- Presigned URLs expire within constrained windows; choose the smallest practical `expirationSeconds`.
+- Use `allowedEmails` for targeted sharing; requests must provide `email` when restriction is set.
+- Prefer `view` for metadata-only access; limit `download` to necessary cases.
+- `edit` grants write capability (PUT presign); audit carefully and revoke when no longer needed.
+- Set `AWS_SSE` to enforce S3 server-side encryption for uploads.
