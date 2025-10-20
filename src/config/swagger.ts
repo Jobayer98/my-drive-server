@@ -13,7 +13,7 @@ const swaggerOptions = {
       description: 'Development server'
     }]
   },
-  apis: ['./src/routes/*.ts']
+  apis: ['./src/api/v1/routes/*.ts']
 };
 
 export const specs = swaggerJsdoc(swaggerOptions);
