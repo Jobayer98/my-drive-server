@@ -7,4 +7,5 @@ logs/
 .env.local
 .DS_Store
 coverage/
+resume-context.md
 .nyc_output/
